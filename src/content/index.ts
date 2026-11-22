@@ -90,12 +90,12 @@ async function bootstrap(): Promise<void> {
       try {
         overlay.mount(playerEl);
       } catch (err) {
-        console.warn('[SubFlow] overlay mount warning:', err);
+        console.warn('[BetterSubtitle] overlay mount warning:', err);
       }
       try {
         playerControl.mount(playerEl);
       } catch (err) {
-        console.warn('[SubFlow] player control mount warning:', err);
+        console.warn('[BetterSubtitle] player control mount warning:', err);
       }
     }
     if (videoEl) {

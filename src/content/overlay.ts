@@ -403,7 +403,7 @@ export class SubtitleOverlay {
     this.statusChipEl.classList.remove('is-processing', 'is-error');
 
     if (st.state === 'loading') {
-      this.statusTextEl.textContent = 'SubFlow: Loading transcript...';
+      this.statusTextEl.textContent = 'BetterSubtitle: Loading transcript...';
       this.statusChipEl.classList.add('visible', 'is-processing');
       return;
     }

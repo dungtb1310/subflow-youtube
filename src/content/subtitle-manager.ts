@@ -403,7 +403,7 @@ export class SubtitleManager {
           : this.settings.targetLanguage;
     return {
       ok: true,
-      filename: `${safeTitle || 'subflow'}.${suffix}.srt`,
+      filename: `${safeTitle || 'bettersubtitle'}.${suffix}.srt`,
       srt,
     };
   }
@@ -485,7 +485,7 @@ export class SubtitleManager {
     if (this.settings.provider === 'offline') {
       const note =
         this.settings.mode !== 'original'
-          ? 'Offline mode active — select Gemini, Ollama, or OpenAI in SubFlow to translate.'
+          ? 'Offline mode active — select Gemini, Ollama, or OpenAI in BetterSubtitle to translate.'
           : undefined;
       this.emitStatus({
         state: 'ready',

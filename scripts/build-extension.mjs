@@ -64,7 +64,7 @@ async function run() {
       sourcemap: false,
       lib: {
         entry: path.resolve(ROOT, 'src/content/page-bridge.ts'),
-        name: 'SubFlowPageBridge',
+        name: 'BetterSubtitlePageBridge',
         formats: ['iife'],
         fileName: () => 'page-bridge.js',
       },
@@ -82,7 +82,7 @@ async function run() {
       sourcemap: false,
       lib: {
         entry: path.resolve(ROOT, 'src/content/index.ts'),
-        name: 'SubFlowContent',
+        name: 'BetterSubtitleContent',
         formats: ['iife'],
         fileName: () => 'content.js',
       },
@@ -110,7 +110,7 @@ async function run() {
   // 5. Copy manifest.json and icons
   copyDirRecursive(PUBLIC_DIR, DIST);
 
-  console.log('SubFlow extension built successfully to dist/');
+  console.log('BetterSubtitle extension built successfully to dist/');
 }
 
 run().catch((err) => {

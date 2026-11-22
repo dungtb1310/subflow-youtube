@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "SubFlow — Smart YouTube Subtitles",
-  "short_name": "SubFlow",
+  "name": "BetterSubtitle — Smart YouTube Subtitles",
+  "short_name": "BetterSubtitle",
   "version": "1.0.0",
   "description": "Replaces YouTube's word-by-word captions with clean sentence-level subtitles, customizable languages, and hybrid Gemini/Ollama/OpenAI AI.",
   "icons": {
@@ -11,7 +11,7 @@
     "128": "icons/icon-128.png"
   },
   "action": {
-    "default_title": "SubFlow — Smart YouTube Subtitles",
+    "default_title": "BetterSubtitle — Smart YouTube Subtitles",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",
