@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, STORAGE_KEY } from './constants';
+import { DEFAULT_SETTINGS, LEGACY_STORAGE_KEY, STORAGE_KEY } from './constants';
 import type { SubFlowSettings } from './types';
 
 function clamp(value: number, min: number, max: number): number {
@@ -34,8 +34,11 @@ export async function loadSettings(): Promise<SubFlowSettings> {
   if (typeof chrome === 'undefined' || !chrome.storage?.local) {
     return { ...DEFAULT_SETTINGS };
   }
-  const data = await chrome.storage.local.get(STORAGE_KEY);
-  return normalizeSettings(data[STORAGE_KEY] as Partial<SubFlowSettings> | undefined);
+  const data = await chrome.storage.local.get([STORAGE_KEY, LEGACY_STORAGE_KEY]);
+  const stored = (data[STORAGE_KEY] ?? data[LEGACY_STORAGE_KEY]) as
+    | Partial<SubFlowSettings>
+    | undefined;
+  return normalizeSettings(stored);
 }
 
 let writeChain: Promise<SubFlowSettings> = Promise.resolve({ ...DEFAULT_SETTINGS });

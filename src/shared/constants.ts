@@ -1,6 +1,7 @@
 import type { SubFlowSettings } from './types';
 
-export const STORAGE_KEY = 'subflow_settings_v1';
+export const STORAGE_KEY = 'bettersubtitle_settings_v1';
+export const LEGACY_STORAGE_KEY = 'subflow_settings_v1';
 
 export const DEFAULT_SETTINGS: SubFlowSettings = {
   enabled: true,

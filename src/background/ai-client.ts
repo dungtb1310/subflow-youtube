@@ -291,7 +291,7 @@ async function callGeminiInteractions(params: {
 }): Promise<{ text: string; usedModel: string }> {
   const apiKey = params.apiKey.trim();
   if (!apiKey) {
-    throw new Error('Gemini API key is missing. Add your key in SubFlow Settings.');
+    throw new Error('Gemini API key is missing. Add your key in BetterSubtitle Settings.');
   }
 
   const primaryModel = params.model.trim() || 'gemini-3.5-flash-lite';

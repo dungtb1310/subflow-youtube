@@ -376,7 +376,7 @@ async function initPopup(): Promise<void> {
     reprocessBtn.disabled = false;
 
     if (!settings.enabled) {
-      videoMetaEl.textContent = 'SubFlow is toggled off for this tab.';
+      videoMetaEl.textContent = 'BetterSubtitle is toggled off for this tab.';
       return;
     }
 

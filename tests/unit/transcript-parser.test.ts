@@ -79,11 +79,11 @@ describe('transcript-parser', () => {
     const classicXml = `<?xml version="1.0" encoding="utf-8" ?>
       <transcript>
         <text start="1.5" dur="2.0">Hello &amp; welcome</text>
-        <text start="4.0" dur="1.8">to SubFlow.</text>
+        <text start="4.0" dur="1.8">to BetterSubtitle.</text>
       </transcript>`;
 
     const wordsClassic = parseXmlTranscript(classicXml);
-    expect(wordsClassic.map((w) => w.text)).toEqual(['Hello', '&', 'welcome', 'to', 'SubFlow.']);
+    expect(wordsClassic.map((w) => w.text)).toEqual(['Hello', '&', 'welcome', 'to', 'BetterSubtitle.']);
     expect(wordsClassic[0].startMs).toBe(1500);
     expect(wordsClassic[3].startMs).toBe(4000);
 
