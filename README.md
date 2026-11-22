@@ -1,6 +1,12 @@
 # BetterSubtitle — Smart YouTube Subtitles
 
+[![Latest Release](https://img.shields.io/github/v/release/dungtb1310/subflow-youtube?label=Download%20Latest&color=F5B942&style=for-the-badge)](https://github.com/dungtb1310/subflow-youtube/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/dungtb1310/subflow-youtube/ci.yml?branch=main&label=CI&style=for-the-badge)](https://github.com/dungtb1310/subflow-youtube/actions/workflows/ci.yml)
+![Manifest V3](https://img.shields.io/badge/Chrome%20%26%20Edge-Manifest%20V3-252B37?style=for-the-badge)
+
 Chrome & Edge (Manifest V3) extension that replaces YouTube's choppy word-by-word auto-captions with **clean sentence-level subtitles**, **flexible language modes** (Refined Original, Translated, or Dual Bilingual), and a **hybrid Cloud + Local AI engine**.
+
+> **Want to use it right away without installing Node.js?** Jump straight to [Quick Install (No Build Required)](#quick-install-recommended--no-nodejs-required) and download the ready-to-use `.zip` from [GitHub Releases](https://github.com/dungtb1310/subflow-youtube/releases/latest).
 
 ---
 
@@ -48,17 +54,41 @@ Chrome & Edge (Manifest V3) extension that replaces YouTube's choppy word-by-wor
 
 ---
 
-## Installation (Load Unpacked in Chrome / Edge)
+## Quick Install (Recommended — No Node.js Required)
 
-1. Install dependencies and build the extension:
-   ```bash
-   npm install
-   npm run build
-   ```
-2. Open `chrome://extensions` (or `edge://extensions`).
-3. Enable **Developer mode**.
-4. Click **Load unpacked** and select the generated `dist/` folder.
-5. Open any YouTube video with captions — BetterSubtitle activates automatically.
+You do **not** need Node.js, npm, or any developer tools to install BetterSubtitle:
+
+1. Go to the [**GitHub Releases**](https://github.com/dungtb1310/subflow-youtube/releases/latest) page and download **`BetterSubtitle-vX.Y.Z.zip`**.
+2. Extract (unzip) the downloaded archive to a permanent folder on your computer (for example, `C:\Extensions\BetterSubtitle`).
+3. Open your browser's extension page:
+   - **Chrome / Brave / Arc:** `chrome://extensions`
+   - **Microsoft Edge:** `edge://extensions`
+4. Turn on **Developer mode** (top-right or left sidebar toggle).
+5. Click **Load unpacked** and select the extracted folder (the folder containing `manifest.json`).
+6. Open any YouTube video with captions — **BetterSubtitle** activates automatically!
+
+---
+
+## Build from Source (For Developers)
+
+```bash
+npm install
+npm run build     # Builds MV3 extension into dist/
+npm run package   # Builds and packages release/BetterSubtitle-v<version>.zip
+```
+
+Then load the generated `dist/` folder via **Load unpacked** in `chrome://extensions` or `edge://extensions`.
+
+### Publishing a New GitHub Release
+
+Pushing a semantic version tag automatically runs tests, packages `BetterSubtitle-vX.Y.Z.zip` + `SHA256SUMS.txt`, and publishes a GitHub Release via `.github/workflows/release.yml`:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+You can also trigger a release manually from the **Actions → Release Extension Package → Run workflow** button on GitHub.
 
 ---
 
