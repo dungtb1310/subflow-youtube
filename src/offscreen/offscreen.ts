@@ -49,10 +49,10 @@ function sendToBackground(msg: BackgroundRequest): void {
   }
 }
 
-function emitState(state: LiveSessionState, error?: string): void {
+function emitState(state: LiveSessionState, error?: string, fatal?: boolean): void {
   sendToBackground({
     type: 'OFFSCREEN_STATE',
-    payload: { state, error },
+    payload: { state, error, fatal },
   });
 }
 
@@ -79,7 +79,7 @@ function closeSocketOnly(): void {
   }
 }
 
-function stopCapture(): void {
+function stopCapture(emitIdle = true): void {
   intentionallyStopped = true;
   closeSocketOnly();
 
@@ -101,6 +101,7 @@ function stopCapture(): void {
 
   if (mediaStream) {
     for (const track of mediaStream.getTracks()) {
+      track.onended = null;
       track.stop();
     }
     mediaStream = null;
@@ -109,7 +110,9 @@ function stopCapture(): void {
   pcmBuffer = [];
   hasSpokenSinceFlush = false;
   activeConfig = null;
-  emitState('idle');
+  if (emitIdle) {
+    emitState('idle');
+  }
 }
 
 function flushPcmChunks(): void {
@@ -132,8 +135,8 @@ function scheduleReconnect(reason?: string): void {
   if (intentionallyStopped || !activeConfig) return;
   reconnectAttempts++;
   if (reconnectAttempts > 6) {
-    emitState('error', reason || 'Live audio stream disconnected repeatedly.');
-    stopCapture();
+    stopCapture(false);
+    emitState('error', reason || 'Live audio stream disconnected repeatedly.', true);
     return;
   }
   const delayMs = Math.min(5000, 600 * reconnectAttempts);
@@ -152,8 +155,8 @@ function connectWebSocket(config: ActiveCaptureConfig): void {
 
   if (config.engine === 'gemini-live') {
     if (!config.geminiApiKey.trim()) {
-      emitState('error', 'Gemini API key is missing. Add it in the AI Engine tab.');
-      stopCapture();
+      stopCapture(false);
+      emitState('error', 'Gemini API key is missing. Add it in the AI Engine tab.', true);
       return;
     }
 
@@ -211,9 +214,14 @@ function connectWebSocket(config: ActiveCaptureConfig): void {
     socket.onclose = (ev: CloseEvent) => {
       if (ws !== socket || intentionallyStopped) return;
       wsReady = false;
-      if (ev.code === 1008 || ev.code === 4003) {
-        emitState('error', 'Gemini Live rejected API key or model access (code 1008).');
-        stopCapture();
+      if (ev.code === 1007 || ev.code === 1008 || ev.code === 4003) {
+        const detail = ev.reason ? ` (${ev.reason})` : '';
+        stopCapture(false);
+        emitState(
+          'error',
+          `Gemini Live rejected session (code ${ev.code})${detail}. Check your API key or model access.`,
+          true,
+        );
         return;
       }
       scheduleReconnect(ev.reason || `Gemini Live closed (code ${ev.code}).`);
@@ -281,7 +289,8 @@ function connectWebSocket(config: ActiveCaptureConfig): void {
 }
 
 async function startCapture(config: ActiveCaptureConfig): Promise<{ ok: boolean; error?: string }> {
-  stopCapture();
+  // Release any previous local stream silently (do NOT emit 'idle' while starting a new session!)
+  stopCapture(false);
   intentionallyStopped = false;
   reconnectAttempts = 0;
   activeConfig = config;
@@ -298,6 +307,13 @@ async function startCapture(config: ActiveCaptureConfig): Promise<{ ok: boolean;
     } as unknown as MediaStreamConstraints;
 
     mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+    for (const track of mediaStream.getTracks()) {
+      track.onended = () => {
+        if (!intentionallyStopped) {
+          stopCapture(true);
+        }
+      };
+    }
 
     audioCtx = new AudioContext();
     await audioCtx.resume().catch(() => {});
@@ -368,8 +384,8 @@ async function startCapture(config: ActiveCaptureConfig): Promise<{ ok: boolean;
     return { ok: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    stopCapture();
-    emitState('error', `Audio capture failed: ${message}`);
+    stopCapture(false);
+    emitState('error', `Audio capture failed: ${message}`, true);
     return { ok: false, error: message };
   }
 }

@@ -74,13 +74,39 @@ export function buildGeminiLiveWsUrl(apiKey: string): string {
   return `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodedKey}`;
 }
 
+const GEMINI_LIVE_BCP47_MAP: Record<string, string> = {
+  en: 'en-US',
+  ja: 'ja-JP',
+  ko: 'ko-KR',
+  zh: 'cmn-Hans-CN',
+  'zh-hans': 'cmn-Hans-CN',
+  'zh-hant': 'yue-Hant-HK',
+  vi: 'vi-VN',
+  fr: 'fr-FR',
+  de: 'de-DE',
+  es: 'es-US',
+  ru: 'ru-RU',
+  pt: 'pt-BR',
+  th: 'th-TH',
+  id: 'id-ID',
+};
+
+export function toGeminiLiveBcp47(sourceLanguage?: string): string[] {
+  const raw = (sourceLanguage || 'auto').trim();
+  if (!raw || raw.toLowerCase() === 'auto') return [];
+  const mapped = GEMINI_LIVE_BCP47_MAP[raw.toLowerCase()];
+  if (mapped) return [mapped];
+  // Pass through already-qualified BCP-47 tags like en-GB, es-419, etc.
+  if (raw.includes('-')) return [raw];
+  return [];
+}
+
 export function buildGeminiLiveSetupMessage(params: {
   model?: string;
   sourceLanguage?: string;
 }): Record<string, unknown> {
   const model = params.model || GEMINI_LIVE_TRANSCRIBE_MODEL;
-  const lang = (params.sourceLanguage || 'auto').trim();
-  const languageCodes = lang && lang !== 'auto' ? [lang] : [];
+  const languageCodes = toGeminiLiveBcp47(params.sourceLanguage);
 
   return {
     setup: {
@@ -89,7 +115,7 @@ export function buildGeminiLiveSetupMessage(params: {
         responseModalities: ['TEXT'],
       },
       inputAudioTranscription: {
-        mode: 'smart',
+        mode: 'SMART',
         languageCodes,
       },
     },

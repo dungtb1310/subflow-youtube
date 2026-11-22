@@ -51,13 +51,18 @@ describe('pcm-utils & Gemini Live wire protocol', () => {
     };
     expect(setupAuto.setup.model).toBe('models/gemini-3.5-transcribe-live');
     expect(setupAuto.setup.generationConfig.responseModalities).toEqual(['TEXT']);
-    expect(setupAuto.setup.inputAudioTranscription.mode).toBe('smart');
+    expect(setupAuto.setup.inputAudioTranscription.mode).toBe('SMART');
     expect(setupAuto.setup.inputAudioTranscription.languageCodes).toEqual([]);
 
     const setupEn = buildGeminiLiveSetupMessage({ sourceLanguage: 'en' }) as {
       setup: { inputAudioTranscription: { languageCodes: string[] } };
     };
-    expect(setupEn.setup.inputAudioTranscription.languageCodes).toEqual(['en']);
+    expect(setupEn.setup.inputAudioTranscription.languageCodes).toEqual(['en-US']);
+
+    const setupZh = buildGeminiLiveSetupMessage({ sourceLanguage: 'zh' }) as {
+      setup: { inputAudioTranscription: { languageCodes: string[] } };
+    };
+    expect(setupZh.setup.inputAudioTranscription.languageCodes).toEqual(['cmn-Hans-CN']);
 
     const audioMsg = buildGeminiLiveAudioMessage('AAAA') as {
       realtimeInput: { audio: { data: string; mimeType: string } };

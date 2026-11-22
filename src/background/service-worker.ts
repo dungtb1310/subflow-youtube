@@ -510,12 +510,14 @@ chrome.runtime.onMessage.addListener(
 
     if (message.type === 'OFFSCREEN_STATE') {
       liveStatus.state = message.payload.state;
-      liveStatus.error = message.payload.error;
-      if (message.payload.state === 'idle' || message.payload.state === 'error') {
-        if (message.payload.state === 'idle') {
-          liveStatus.active = false;
-          liveStatus.audioLevel = 0;
-        }
+      liveStatus.error = message.payload.state === 'listening' ? undefined : message.payload.error;
+      if (
+        message.payload.state === 'idle' ||
+        (message.payload.state === 'error' && message.payload.fatal)
+      ) {
+        liveStatus.active = false;
+        liveStatus.audioLevel = 0;
+        void closeOffscreenDocument();
       }
       if (liveStatus.tabId !== null) {
         sendTabMessageSafe(liveStatus.tabId, {
@@ -523,7 +525,7 @@ chrome.runtime.onMessage.addListener(
           payload: {
             active: liveStatus.active,
             state: message.payload.state,
-            error: message.payload.error,
+            error: liveStatus.error,
           },
         });
       }

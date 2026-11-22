@@ -316,6 +316,8 @@ async function initPopup(): Promise<void> {
 
     if (liveStatus.state === 'error' && liveStatus.error) {
       showLiveFeedback(liveStatus.error, 'err');
+    } else if (liveStatus.state === 'listening') {
+      liveFeedbackEl.classList.add('hidden');
     }
 
     exportLiveSrtBtn.disabled = liveStatus.cueCount === 0;
@@ -618,17 +620,33 @@ async function initPopup(): Promise<void> {
         return;
       }
 
-      const streamId = await new Promise<string>((resolve, reject) => {
-        chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id }, (id) => {
-          if (chrome.runtime.lastError || !id) {
-            reject(
-              new Error(chrome.runtime.lastError?.message || 'Could not obtain tab audio stream.'),
-            );
-            return;
-          }
-          resolve(id);
+      const requestTabStreamId = (targetTabId: number): Promise<string> =>
+        new Promise<string>((resolve, reject) => {
+          chrome.tabCapture.getMediaStreamId({ targetTabId }, (id) => {
+            if (chrome.runtime.lastError || !id) {
+              reject(
+                new Error(chrome.runtime.lastError?.message || 'Could not obtain tab audio stream.'),
+              );
+              return;
+            }
+            resolve(id);
+          });
         });
-      });
+
+      let streamId: string;
+      try {
+        streamId = await requestTabStreamId(tab.id);
+      } catch (captureErr) {
+        const msg = captureErr instanceof Error ? captureErr.message : String(captureErr);
+        // Self-heal if an orphaned offscreen capture stream was still attached to this tab
+        if (/active stream/i.test(msg)) {
+          await sendBackground({ type: 'STOP_LIVE_AUDIO' });
+          await new Promise((r) => window.setTimeout(r, 250));
+          streamId = await requestTabStreamId(tab.id);
+        } else {
+          throw captureErr;
+        }
+      }
 
       const res = await sendBackground<{
         ok: boolean;

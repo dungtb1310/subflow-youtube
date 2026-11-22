@@ -167,7 +167,15 @@ function mountUniversalOverlay(): void {
   box.append(primaryEl, secondaryEl);
   stage.append(chip, box);
   shadow.appendChild(stage);
-  (document.body || document.documentElement).appendChild(host);
+
+  const attachHostToContainer = () => {
+    const target = document.fullscreenElement || document.body || document.documentElement;
+    if (target && host.parentElement !== target) {
+      target.appendChild(host);
+    }
+  };
+  attachHostToContainer();
+  document.addEventListener('fullscreenchange', attachHostToContainer);
 
   const applyStyles = () => {
     host.style.setProperty('--bs-font-size', `${settings.fontSize}px`);

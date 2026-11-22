@@ -185,6 +185,7 @@ export type BackgroundRequest =
       payload: {
         state: LiveSessionState;
         error?: string;
+        fatal?: boolean;
       };
     }
   | {

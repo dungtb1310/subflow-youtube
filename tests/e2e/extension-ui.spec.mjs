@@ -611,6 +611,38 @@ async function run() {
 
     assert.equal(liveErrors.length, 0, `Universal live-overlay errors: ${liveErrors.join('; ')}`);
     console.log('[E2E] Universal non-YouTube live-overlay.js injection & rendering PASSED');
+
+    // 6. Verify MV3 Offscreen Document boot, OFFSCREEN_STOP auto-closes offscreen doc, and fatal error UI preservation
+    const offscreenCycle = await serviceWorker.evaluate(async () => {
+      await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: ['USER_MEDIA'],
+        justification: 'E2E offscreen lifecycle verification',
+      });
+      const stopRes = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'OFFSCREEN_STOP' }, (resp) => {
+          resolve({ ok: resp?.ok ?? false, err: chrome.runtime.lastError?.message ?? null });
+        });
+      });
+      await new Promise((r) => setTimeout(r, 150));
+      const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+      return { stopRes, remainingOffscreenDocs: contexts.length };
+    });
+    assert.equal(offscreenCycle.stopRes.ok, true, `OFFSCREEN_STOP failed: ${JSON.stringify(offscreenCycle)}`);
+    assert.equal(offscreenCycle.remainingOffscreenDocs, 0, 'Service worker must auto-close offscreen doc on idle');
+
+    await popupPage.click('#tab-live');
+    await popupPage.evaluate(async () => {
+      await chrome.runtime.sendMessage({
+        type: 'OFFSCREEN_STATE',
+        payload: { state: 'error', error: 'Simulated fatal live error', fatal: true },
+      });
+    });
+    await popupPage.waitForTimeout(700);
+    const liveErrText = await popupPage.textContent('#live-feedback');
+    assert.match(liveErrText ?? '', /Simulated fatal live error/);
+    assert.equal(await popupPage.textContent('#live-toggle-label'), 'Start Live Audio Capture');
+    console.log('[E2E] MV3 Offscreen Document lifecycle & fatal error cleanup PASSED');
   } finally {
     if (context) {
       await context.close().catch(() => {});
