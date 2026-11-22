@@ -1,0 +1,22 @@
+{
+  "name": "subflow-youtube",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Smart sentence-level & AI-powered subtitle extension for YouTube",
+  "scripts": {
+    "build": "node scripts/build-extension.mjs",
+    "icons": "node scripts/generate-icons.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "node tests/e2e/extension-ui.spec.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.312",
+    "playwright-core": "^1.51.1",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0",
+    "vitest": "^3.0.9"
+  }
+}
