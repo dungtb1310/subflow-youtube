@@ -5,7 +5,7 @@ import path from 'node:path';
 import { chromium } from 'playwright-core';
 
 const ROOT = process.cwd();
-const DIST = path.resolve(ROOT, 'dist');
+const DIST = process.env.EXT_DIR ? path.resolve(process.env.EXT_DIR) : path.resolve(ROOT, 'dist');
 const SCREENSHOT_DIR = process.env.SUBFLOW_E2E_SCREENSHOTS || '';
 
 function findChromiumExecutable() {

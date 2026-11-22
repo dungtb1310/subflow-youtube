@@ -1,0 +1,85 @@
+name: Release Extension Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck & unit tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Resolve release tag
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & package extension ZIP
+        run: |
+          npm run build
+          node scripts/package-extension.mjs "${{ steps.meta.outputs.tag }}"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          ZIP_FILE="release/BetterSubtitle-${TAG}.zip"
+          NOTES=$(cat <<EOF
+          ## BetterSubtitle ${TAG} — Ready-to-Install Chrome & Edge Extension
+
+          No Node.js or build step required!
+
+          ### Quick Install (30 seconds)
+          1. Download **\`BetterSubtitle-${TAG}.zip\`** below and extract it to a permanent folder.
+          2. Open \`chrome://extensions\` (Chrome) or \`edge://extensions\` (Edge) and enable **Developer mode**.
+          3. Click **Load unpacked** and select the extracted folder.
+          4. Open any YouTube video with captions — BetterSubtitle works immediately!
+
+          ### Included Assets
+          - \`BetterSubtitle-${TAG}.zip\` — Pre-built Manifest V3 extension package
+          - \`SHA256SUMS.txt\` — Checksum for package verification
+          EOF
+          )
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" "${ZIP_FILE}" release/SHA256SUMS.txt --clobber
+            gh release edit "${TAG}" --title "BetterSubtitle ${TAG}" --notes "${NOTES}"
+          else
+            gh release create "${TAG}" "${ZIP_FILE}" release/SHA256SUMS.txt \
+              --target "${GITHUB_SHA}" \
+              --title "BetterSubtitle ${TAG}" \
+              --notes "${NOTES}" \
+              --latest
+          fi
