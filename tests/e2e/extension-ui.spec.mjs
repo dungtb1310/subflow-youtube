@@ -191,7 +191,9 @@ const YOUTUBE_HARNESS_HTML = `<!DOCTYPE html>
     <div class="ytp-chrome-bottom">
       <div class="ytp-left-controls">0:01 / 0:10</div>
       <div class="ytp-right-controls">
-        <button class="ytp-button ytp-subtitles-button" title="Subtitles/closed captions">CC</button>
+        <div class="ytp-right-controls-left">
+          <button class="ytp-button ytp-subtitles-button" title="Subtitles/closed captions">CC</button>
+        </div>
         <button class="ytp-button" title="Settings">HD</button>
       </div>
     </div>

@@ -20,6 +20,8 @@ import type {
 interface BridgePlayerTracksResult {
   videoId: string | null;
   videoTitle: string;
+  defaultAudioLanguage?: string;
+  activePlayerLang?: string;
   tracks: CaptionTrackInfo[];
   interceptedBody: string | null;
   interceptedLang: string | null;
@@ -40,11 +42,54 @@ export function extractVideoIdFromUrl(urlStr: string): string | null {
   return null;
 }
 
-function pickBestCaptionTrack(tracks: CaptionTrackInfo[]): CaptionTrackInfo | null {
+function normalizeLangPrefix(code?: string): string {
+  return (code ?? '').toLowerCase().split('-')[0];
+}
+
+export function pickBestCaptionTrack(
+  tracks: CaptionTrackInfo[],
+  hints?: { defaultAudioLanguage?: string; activePlayerLang?: string },
+): CaptionTrackInfo | null {
   if (tracks.length === 0) return null;
-  // Prefer manual captions over auto-generated ASR if both exist for the same primary language
-  const manual = tracks.find((t) => t.kind !== 'asr');
-  if (manual) return manual;
+
+  // 1. Identify the video's native spoken language.
+  //    YouTube's ASR track is always generated in the video's original audio language,
+  //    unlike captionTracks[] which is sorted alphabetically (ar, bn, zh, ..., en).
+  const asrTrack = tracks.find((t) => t.kind === 'asr');
+  const defaultMarked = tracks.find((t) => t.isDefault);
+  const nativeLangPrefix = normalizeLangPrefix(
+    hints?.defaultAudioLanguage || asrTrack?.languageCode || defaultMarked?.languageCode,
+  );
+
+  if (nativeLangPrefix) {
+    // Prefer manual captions in the video's native spoken language first
+    const nativeManual = tracks.find(
+      (t) => t.kind !== 'asr' && normalizeLangPrefix(t.languageCode) === nativeLangPrefix,
+    );
+    if (nativeManual) return nativeManual;
+
+    // Next prefer the native ASR track
+    const nativeAsr = tracks.find(
+      (t) => t.kind === 'asr' && normalizeLangPrefix(t.languageCode) === nativeLangPrefix,
+    );
+    if (nativeAsr) return nativeAsr;
+  }
+
+  // 2. Respect YouTube's default track index if present
+  if (defaultMarked) return defaultMarked;
+
+  // 3. Respect currently active player caption language
+  if (hints?.activePlayerLang) {
+    const activeMatch = tracks.find(
+      (t) => normalizeLangPrefix(t.languageCode) === normalizeLangPrefix(hints.activePlayerLang),
+    );
+    if (activeMatch) return activeMatch;
+  }
+
+  // 4. Fallback to English if available, then first track
+  const english = tracks.find((t) => normalizeLangPrefix(t.languageCode) === 'en');
+  if (english) return english;
+
   return tracks[0];
 }
 
@@ -109,13 +154,13 @@ export class SubtitleManager {
       return;
     }
 
-    // Handle organic intercepted timedtext payload if we haven't loaded words yet
+    // Handle organic intercepted timedtext payload (e.g. user toggles CC or YouTube finishes POT fetch)
     if (
       msg.type === 'INTERCEPTED_TIMEDTEXT' &&
       msg.videoId &&
       msg.videoId === this.currentVideoId &&
-      this.words.length === 0 &&
-      msg.body
+      msg.body &&
+      (this.words.length === 0 || (msg.lang && msg.lang !== this.status.sourceLanguage))
     ) {
       const parsed = parseYouTubeTranscript(msg.body);
       if (parsed.length > 0) {
@@ -293,7 +338,10 @@ export class SubtitleManager {
     }
 
     this.videoTitle = playerData.videoTitle || document.title.replace(/ - YouTube$/, '');
-    const bestTrack = pickBestCaptionTrack(playerData.tracks);
+    const bestTrack = pickBestCaptionTrack(playerData.tracks, {
+      defaultAudioLanguage: playerData.defaultAudioLanguage,
+      activePlayerLang: playerData.activePlayerLang,
+    });
     this.currentTrack = bestTrack;
 
     let rawPayload = '';

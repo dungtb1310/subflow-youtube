@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { pickBestCaptionTrack } from '../../src/content/subtitle-manager';
 import {
   decodeHtmlEntities,
   parseJson3Transcript,
@@ -93,5 +94,25 @@ describe('transcript-parser', () => {
     expect(wordsSrv3.map((w) => w.text)).toEqual(['hello', 'world']);
     expect(wordsSrv3[0].startMs).toBe(2000);
     expect(wordsSrv3[1].startMs).toBe(2400);
+  });
+
+  it('picks native spoken language track instead of alphabetical first track (e.g. English over Arabic)', () => {
+    const tracks = [
+      { languageCode: 'ar', name: 'Arabic', baseUrl: 'https://yt/ar' },
+      { languageCode: 'bn', name: 'Bangla', baseUrl: 'https://yt/bn' },
+      { languageCode: 'en', name: 'English', baseUrl: 'https://yt/en', isDefault: true },
+      { languageCode: 'en', name: 'English (auto-generated)', baseUrl: 'https://yt/en-asr', kind: 'asr' },
+      { languageCode: 'vi', name: 'Vietnamese', baseUrl: 'https://yt/vi' },
+    ];
+    const picked = pickBestCaptionTrack(tracks);
+    expect(picked?.languageCode).toBe('en');
+    expect(picked?.kind).toBeUndefined();
+
+    // When only ASR exists for native spoken language alongside translated manual tracks
+    const asrOnlyNative = [
+      { languageCode: 'ar', name: 'Arabic', baseUrl: 'https://yt/ar' },
+      { languageCode: 'ja', name: 'Japanese (auto-generated)', baseUrl: 'https://yt/ja-asr', kind: 'asr' },
+    ];
+    expect(pickBestCaptionTrack(asrOnlyNative)?.languageCode).toBe('ja');
   });
 });

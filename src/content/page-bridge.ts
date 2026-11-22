@@ -1,7 +1,8 @@
 /**
  * SubFlow Page Bridge (runs in MAIN world at document_start).
- * Safely reads YouTube player caption tracks and intercepts signed /api/timedtext responses
- * so SubFlow works reliably even when YouTube attaches POT (Proof-of-Origin) tokens.
+ * Safely reads YouTube player caption tracks and captures signed /api/timedtext responses
+ * (including YouTube's Proof-of-Origin `pot` token) via fetch/XHR observation,
+ * PerformanceResourceTiming lookup, and native YouTube caption track activation.
  */
 
 export {};
@@ -14,22 +15,38 @@ interface RawCaptionTrack {
   isTranslatable?: boolean;
 }
 
+interface RawAudioTrack {
+  defaultCaptionTrackIndex?: number;
+  hasDefaultTrack?: boolean;
+}
+
 interface PlayerResponseLike {
   videoDetails?: {
     videoId?: string;
     title?: string;
+    defaultAudioLanguage?: string;
   };
   captions?: {
     playerCaptionsTracklistRenderer?: {
       captionTracks?: RawCaptionTrack[];
+      audioTracks?: RawAudioTrack[];
     };
   };
+}
+
+interface PlayerTrackOption {
+  languageCode?: string;
+  kind?: string;
+  vss_id?: string;
+  displayName?: string;
 }
 
 interface MoviePlayerElement extends HTMLElement {
   getPlayerResponse?: () => PlayerResponseLike | null;
   loadModule?: (moduleName: string) => void;
   setOption?: (moduleName: string, option: string, value: unknown) => void;
+  getOption?: (moduleName: string, option: string) => unknown;
+  toggleSubtitles?: () => void;
 }
 
 declare global {
@@ -47,6 +64,8 @@ declare global {
     string,
     { url: string; lang: string; body: string; timestamp: number }
   >();
+  const potByVideo = new Map<string, string>();
+  const signedUrlByVideo = new Map<string, string>();
 
   function getCurrentVideoIdFromUrl(): string | null {
     try {
@@ -71,7 +90,22 @@ declare global {
     return raw.languageCode ?? 'Unknown';
   }
 
+  function recordTimedTextUrlMeta(urlStr: string): void {
+    try {
+      const parsedUrl = new URL(urlStr, window.location.origin);
+      const videoId = parsedUrl.searchParams.get('v') || getCurrentVideoIdFromUrl();
+      const pot = parsedUrl.searchParams.get('pot');
+      if (videoId && pot) {
+        potByVideo.set(videoId, pot);
+        signedUrlByVideo.set(videoId, parsedUrl.toString());
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   function recordTimedTextPayload(urlStr: string, body: string): void {
+    recordTimedTextUrlMeta(urlStr);
     if (!body || body.trim().length < 10) return;
     try {
       const parsedUrl = new URL(urlStr, window.location.origin);
@@ -116,6 +150,7 @@ declare global {
             ? input.toString()
             : input.url;
       if (url && url.includes('/api/timedtext')) {
+        recordTimedTextUrlMeta(url);
         const cloned = response.clone();
         cloned
           .text()
@@ -147,6 +182,7 @@ declare global {
   ) {
     const reqUrl = (this as XMLHttpRequest & { __sfUrl?: string }).__sfUrl;
     if (reqUrl && reqUrl.includes('/api/timedtext')) {
+      recordTimedTextUrlMeta(reqUrl);
       this.addEventListener('load', () => {
         try {
           if (typeof this.responseText === 'string' && this.responseText.length > 0) {
@@ -159,6 +195,32 @@ declare global {
     }
     return origSend.call(this, body);
   };
+
+  /**
+   * Scans PerformanceResourceTiming for any /api/timedtext URL YouTube already fetched
+   * before our bridge was injected (e.g., when extension was loaded onto an already-open tab).
+   */
+  function findSignedTimedTextFromPerformance(videoId: string): string | null {
+    try {
+      const entries = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const name = entries[i]?.name;
+        if (!name || !name.includes('/api/timedtext')) continue;
+        const parsed = new URL(name);
+        if (parsed.searchParams.get('v') !== videoId) continue;
+        const pot = parsed.searchParams.get('pot');
+        if (pot) {
+          potByVideo.set(videoId, pot);
+          if (!parsed.searchParams.get('tlang')) {
+            return name;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  }
 
   function readPlayerData() {
     const player = document.getElementById('movie_player') as MoviePlayerElement | null;
@@ -183,18 +245,60 @@ declare global {
 
     const videoId = resp?.videoDetails?.videoId ?? urlVideoId;
     const videoTitle = resp?.videoDetails?.title ?? document.title.replace(/ - YouTube$/, '');
-    const rawTracks = resp?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
+    const defaultAudioLanguage = resp?.videoDetails?.defaultAudioLanguage ?? '';
+    const renderer = resp?.captions?.playerCaptionsTracklistRenderer;
+    const rawTracks = renderer?.captionTracks ?? [];
+    const defaultTrackIdx = renderer?.audioTracks?.[0]?.defaultCaptionTrackIndex;
+
+    let activePlayerLang = '';
+    try {
+      const activeTrack = player?.getOption?.('captions', 'track') as PlayerTrackOption | undefined;
+      if (activeTrack?.languageCode) {
+        activePlayerLang = activeTrack.languageCode;
+      }
+    } catch {
+      // ignore
+    }
+
     const tracks = rawTracks
-      .filter((t) => Boolean(t.baseUrl && t.languageCode))
-      .map((t) => ({
-        languageCode: t.languageCode as string,
-        name: extractTrackName(t),
-        baseUrl: t.baseUrl as string,
-        kind: t.kind,
-        isTranslatable: t.isTranslatable,
+      .map((t, idx) => ({
+        raw: t,
+        isDefault: typeof defaultTrackIdx === 'number' && idx === defaultTrackIdx,
+      }))
+      .filter(({ raw }) => Boolean(raw.baseUrl && raw.languageCode))
+      .map(({ raw, isDefault }) => ({
+        languageCode: raw.languageCode as string,
+        name: extractTrackName(raw),
+        baseUrl: raw.baseUrl as string,
+        kind: raw.kind,
+        isTranslatable: raw.isTranslatable,
+        isDefault,
       }));
 
-    return { videoId, videoTitle, tracks };
+    return { videoId, videoTitle, defaultAudioLanguage, activePlayerLang, tracks };
+  }
+
+  async function tryFetchUrl(urlStr: string): Promise<string> {
+    try {
+      const res = await nativeFetch(urlStr, { credentials: 'include' });
+      if (res.ok) {
+        const text = await res.text();
+        if (text.trim().length > 10) return text;
+      }
+    } catch {
+      // ignore
+    }
+    return '';
+  }
+
+  function buildUrlWithParams(baseUrl: string, fmt: string | null, pot?: string): string {
+    const url = new URL(baseUrl, window.location.origin);
+    if (fmt) url.searchParams.set('fmt', fmt);
+    if (pot && !url.searchParams.get('pot')) {
+      url.searchParams.set('potc', '1');
+      url.searchParams.set('pot', pot);
+    }
+    return url.toString();
   }
 
   async function fetchTrackPayload(
@@ -202,59 +306,86 @@ declare global {
     baseUrl: string,
     languageCode: string,
   ): Promise<string> {
-    // Check if we already intercepted a fresh timedtext body for this video
+    // 1. Check already-intercepted timedtext body for this video
     const cached = interceptedByVideo.get(videoId);
     if (cached && (!languageCode || cached.lang === languageCode) && cached.body.trim().length > 10) {
       return cached.body;
     }
 
-    // Try direct json3 fetch with page credentials
-    const json3Url = new URL(baseUrl, window.location.origin);
-    json3Url.searchParams.set('fmt', 'json3');
-
-    try {
-      const res = await nativeFetch(json3Url.toString(), { credentials: 'include' });
-      if (res.ok) {
-        const text = await res.text();
-        if (text.trim().length > 10) {
-          return text;
-        }
-      }
-    } catch {
-      // fall through to XML or player trigger
+    // 2. Check previously observed signed URL (or PerformanceResourceTiming) stripping any tlang
+    const perfSignedUrl =
+      signedUrlByVideo.get(videoId) || findSignedTimedTextFromPerformance(videoId);
+    if (perfSignedUrl) {
+      const cleaned = new URL(perfSignedUrl, window.location.origin);
+      cleaned.searchParams.delete('tlang');
+      cleaned.searchParams.set('fmt', 'json3');
+      const perfText = await tryFetchUrl(cleaned.toString());
+      if (perfText) return perfText;
     }
 
-    // Try plain XML baseUrl without fmt=json3
-    try {
-      const resXml = await nativeFetch(baseUrl, { credentials: 'include' });
-      if (resXml.ok) {
-        const text = await resXml.text();
-        if (text.trim().length > 10) {
-          return text;
-        }
-      }
-    } catch {
-      // fall through
-    }
+    // 3. Try direct json3 / XML fetch (attaching any known POT token for this video)
+    const knownPot = potByVideo.get(videoId);
+    const directJson3 = await tryFetchUrl(buildUrlWithParams(baseUrl, 'json3', knownPot));
+    if (directJson3) return directJson3;
 
-    // Final fallback: ask YouTube's own player to load the caption track so our interceptor captures signed POT request
+    const directXml = await tryFetchUrl(buildUrlWithParams(baseUrl, null, knownPot));
+    if (directXml) return directXml;
+
+    // 4. Trigger YouTube's own player caption loader so YouTube mints a valid POT token
+    //    and fetches signed /api/timedtext through our interceptor.
     const player = document.getElementById('movie_player') as MoviePlayerElement | null;
-    if (player && typeof player.loadModule === 'function' && typeof player.setOption === 'function') {
+    if (player) {
       try {
-        player.loadModule('captions');
-        player.setOption('captions', 'track', { languageCode });
-        // Wait up to 2.5s for YouTube's signed timedtext request to pass through our interceptor
+        player.loadModule?.('captions');
+
+        // Look up the exact internal track object from YouTube's tracklist
+        const tracklist = player.getOption?.('captions', 'tracklist') as PlayerTrackOption[] | undefined;
+        let targetTrackObj: PlayerTrackOption = { languageCode };
+        if (Array.isArray(tracklist) && tracklist.length > 0) {
+          const exactManual = tracklist.find(
+            (t) => t.languageCode === languageCode && t.kind !== 'asr',
+          );
+          const exactAny = tracklist.find((t) => t.languageCode === languageCode);
+          if (exactManual) targetTrackObj = exactManual;
+          else if (exactAny) targetTrackObj = exactAny;
+        }
+
+        // If YouTube's CC button is currently OFF, click it so YouTube actually fetches timedtext
+        const ccBtn = player.querySelector<HTMLButtonElement>('.ytp-subtitles-button');
+        const wasCcOff = ccBtn?.getAttribute('aria-pressed') === 'false';
+        if (wasCcOff && ccBtn) {
+          ccBtn.click();
+        } else if (typeof player.setOption === 'function') {
+          // Force reload of the selected track if CC was already on
+          player.setOption('captions', 'track', {});
+          await new Promise((r) => setTimeout(r, 80));
+        }
+
+        player.setOption?.('captions', 'track', targetTrackObj);
+
+        // Wait up to 3.8s for YouTube's signed timedtext response or POT token
         const started = Date.now();
-        while (Date.now() - started < 2500) {
+        while (Date.now() - started < 3800) {
           const hit = interceptedByVideo.get(videoId);
           if (hit && hit.body.trim().length > 10) {
             return hit.body;
           }
-          await new Promise((r) => setTimeout(r, 150));
+          const freshPot = potByVideo.get(videoId);
+          if (freshPot && freshPot !== knownPot) {
+            const potJson3 = await tryFetchUrl(buildUrlWithParams(baseUrl, 'json3', freshPot));
+            if (potJson3) return potJson3;
+          }
+          await new Promise((r) => setTimeout(r, 180));
         }
       } catch {
         // ignore
       }
+    }
+
+    // Last chance: return any intercepted payload for this video regardless of language
+    const fallbackCached = interceptedByVideo.get(videoId);
+    if (fallbackCached && fallbackCached.body.trim().length > 10) {
+      return fallbackCached.body;
     }
 
     return '';

@@ -57,11 +57,9 @@ async function queryActiveYouTubeTab(): Promise<chrome.tabs.Tab | null> {
   return tab;
 }
 
-async function sendToActiveTab<T>(msg: ContentRequest): Promise<T | null> {
-  const tab = await queryActiveYouTubeTab();
-  if (!tab?.id) return null;
+async function sendMessageOnce<T>(tabId: number, msg: ContentRequest): Promise<T | null> {
   return new Promise((resolve) => {
-    chrome.tabs.sendMessage(tab.id as number, msg, (response: T) => {
+    chrome.tabs.sendMessage(tabId, msg, (response: T) => {
       if (chrome.runtime.lastError) {
         resolve(null);
         return;
@@ -69,6 +67,28 @@ async function sendToActiveTab<T>(msg: ContentRequest): Promise<T | null> {
       resolve(response ?? null);
     });
   });
+}
+
+async function sendToActiveTab<T>(msg: ContentRequest): Promise<T | null> {
+  const tab = await queryActiveYouTubeTab();
+  if (!tab?.id) return null;
+  const first = await sendMessageOnce<T>(tab.id, msg);
+  if (first !== null) return first;
+
+  // Auto-inject into already-open YouTube tabs (e.g. opened before extension install/reload)
+  try {
+    const injected = await sendBackground<{ ok: boolean }>({
+      type: 'ENSURE_CONTENT_SCRIPT',
+      payload: { tabId: tab.id },
+    });
+    if (injected?.ok) {
+      await new Promise((r) => setTimeout(r, 280));
+      return await sendMessageOnce<T>(tab.id, msg);
+    }
+  } catch {
+    // ignore
+  }
+  return null;
 }
 
 function triggerFileDownload(filename: string, content: string): void {
@@ -601,6 +621,9 @@ async function initPopup(): Promise<void> {
 
   renderSettings();
   await refreshActiveVideoStatus();
+  window.setInterval(() => {
+    void refreshActiveVideoStatus();
+  }, 1400);
 }
 
 void initPopup();

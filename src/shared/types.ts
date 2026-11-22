@@ -30,6 +30,7 @@ export interface CaptionTrackInfo {
   baseUrl: string;
   kind?: string;
   isTranslatable?: boolean;
+  isDefault?: boolean;
 }
 
 export interface WordToken {
@@ -109,6 +110,12 @@ export type BackgroundRequest =
       type: 'LIST_OLLAMA_MODELS';
       payload: {
         ollamaUrl: string;
+      };
+    }
+  | {
+      type: 'ENSURE_CONTENT_SCRIPT';
+      payload: {
+        tabId: number;
       };
     };
 

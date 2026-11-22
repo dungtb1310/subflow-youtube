@@ -309,8 +309,8 @@ export class PlayerControl {
     });
 
     const nativeCCBtn = rightControls.querySelector('.ytp-subtitles-button');
-    if (nativeCCBtn) {
-      rightControls.insertBefore(btn, nativeCCBtn);
+    if (nativeCCBtn && nativeCCBtn.parentElement && rightControls.contains(nativeCCBtn.parentElement)) {
+      nativeCCBtn.parentElement.insertBefore(btn, nativeCCBtn);
     } else {
       rightControls.prepend(btn);
     }

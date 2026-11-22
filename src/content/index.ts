@@ -46,17 +46,57 @@ async function bootstrap(): Promise<void> {
 
   subscribeSettings(applySettings);
 
+  // Respond to Popup requests on the active YouTube tab (register before DOM mount so popup always connects)
+  if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((message: ContentRequest, _sender, sendResponse) => {
+      if (!message || typeof message !== 'object' || !('type' in message)) return false;
+
+      if (message.type === 'GET_STATUS') {
+        sendResponse(manager.getStatus());
+        return false;
+      }
+      if (message.type === 'EXPORT_SRT') {
+        sendResponse(manager.exportCurrentSrt());
+        return false;
+      }
+      if (message.type === 'CLEAR_CACHE') {
+        manager
+          .clearCacheAndReprocess()
+          .then(() => sendResponse({ ok: true }))
+          .catch(() => sendResponse({ ok: false }));
+        return true;
+      }
+      if (message.type === 'REPROCESS_VIDEO') {
+        manager
+          .reprocessCurrentVideo()
+          .then(() => sendResponse({ ok: true }))
+          .catch(() => sendResponse({ ok: false }));
+        return true;
+      }
+      return false;
+    });
+  }
+
   let lastUrl = window.location.href;
   let lastVideoId: string | null = null;
 
   const ensurePlayerMounted = () => {
     const playerEl = document.querySelector<HTMLElement>('.html5-video-player');
-    const videoEl = playerEl?.querySelector<HTMLVideoElement>('video.html5-main-video') ??
+    const videoEl =
+      playerEl?.querySelector<HTMLVideoElement>('video.html5-main-video') ??
       playerEl?.querySelector<HTMLVideoElement>('video');
 
     if (playerEl) {
-      overlay.mount(playerEl);
-      playerControl.mount(playerEl);
+      try {
+        overlay.mount(playerEl);
+      } catch (err) {
+        console.warn('[SubFlow] overlay mount warning:', err);
+      }
+      try {
+        playerControl.mount(playerEl);
+      } catch (err) {
+        console.warn('[SubFlow] player control mount warning:', err);
+      }
     }
     if (videoEl) {
       manager.attachVideo(videoEl);
@@ -112,37 +152,6 @@ async function bootstrap(): Promise<void> {
     ev.preventDefault();
     void saveSettings({ enabled: !settings.enabled });
   });
-
-  // Respond to Popup requests on the active YouTube tab
-  if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
-    chrome.runtime.onMessage.addListener((message: ContentRequest, _sender, sendResponse) => {
-      if (!message || typeof message !== 'object' || !('type' in message)) return false;
-
-      if (message.type === 'GET_STATUS') {
-        sendResponse(manager.getStatus());
-        return false;
-      }
-      if (message.type === 'EXPORT_SRT') {
-        sendResponse(manager.exportCurrentSrt());
-        return false;
-      }
-      if (message.type === 'CLEAR_CACHE') {
-        manager
-          .clearCacheAndReprocess()
-          .then(() => sendResponse({ ok: true }))
-          .catch(() => sendResponse({ ok: false }));
-        return true;
-      }
-      if (message.type === 'REPROCESS_VIDEO') {
-        manager
-          .reprocessCurrentVideo()
-          .then(() => sendResponse({ ok: true }))
-          .catch(() => sendResponse({ ok: false }));
-        return true;
-      }
-      return false;
-    });
-  }
 
   ensurePlayerMounted();
 }

@@ -172,6 +172,7 @@ export class SubtitleOverlay {
   private currentCue: SubtitleCue | null = null;
   private currentStatus: RuntimeStatus | null = null;
   private controlsObserver: MutationObserver | null = null;
+  private statusHideTimer: number | null = null;
   private pausedByHover = false;
   private onPositionCommit?: (bottomOffsetPercent: number) => void;
 
@@ -388,6 +389,11 @@ export class SubtitleOverlay {
   private renderStatus(): void {
     if (!this.statusChipEl || !this.statusTextEl) return;
 
+    if (this.statusHideTimer !== null) {
+      window.clearTimeout(this.statusHideTimer);
+      this.statusHideTimer = null;
+    }
+
     const st = this.currentStatus;
     if (!this.settings.enabled || !st) {
       this.statusChipEl.classList.remove('visible', 'is-processing', 'is-error');
@@ -415,6 +421,15 @@ export class SubtitleOverlay {
     if (st.state === 'error' && st.message) {
       this.statusTextEl.textContent = st.message;
       this.statusChipEl.classList.add('visible', 'is-error');
+      return;
+    }
+
+    if (st.state === 'no-captions' && st.message) {
+      this.statusTextEl.textContent = st.message;
+      this.statusChipEl.classList.add('visible');
+      this.statusHideTimer = window.setTimeout(() => {
+        this.statusChipEl?.classList.remove('visible');
+      }, 6000);
       return;
     }
 
