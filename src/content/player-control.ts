@@ -279,8 +279,8 @@ export class PlayerControl {
     btn.id = BTN_ID;
     btn.type = 'button';
     btn.className = 'ytp-button subflow-ytp-btn';
-    btn.title = 'SubFlow Smart Subtitles (Alt+S to toggle)';
-    btn.setAttribute('aria-label', 'SubFlow Smart Subtitles');
+    btn.title = 'BetterSubtitle Smart Subtitles (Alt+S to toggle)';
+    btn.setAttribute('aria-label', 'BetterSubtitle Smart Subtitles');
     btn.setAttribute('aria-haspopup', 'dialog');
     btn.setAttribute('aria-expanded', 'false');
     btn.style.position = 'relative';
@@ -327,20 +327,20 @@ export class PlayerControl {
     const panel = document.createElement('div');
     panel.className = 'sf-pop hidden';
     panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', 'SubFlow quick controls');
+    panel.setAttribute('aria-label', 'BetterSubtitle quick controls');
 
     // Header row
     const head = document.createElement('div');
     head.className = 'sf-pop-head';
     const title = document.createElement('span');
     title.className = 'sf-pop-title';
-    title.textContent = 'SubFlow Subtitles';
+    title.textContent = 'BetterSubtitle';
 
     const sw = document.createElement('button');
     sw.type = 'button';
     sw.className = 'sf-switch';
     sw.setAttribute('role', 'switch');
-    sw.setAttribute('aria-label', 'Enable SubFlow subtitles');
+    sw.setAttribute('aria-label', 'Enable BetterSubtitle subtitles');
     sw.addEventListener('click', () => {
       this.callbacks.onPatchSettings({ enabled: !this.settings.enabled });
     });

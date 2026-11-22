@@ -274,7 +274,7 @@ async function run() {
     const extIdMatch = swUrl.match(/^chrome-extension:\/\/([a-z0-9]+)\//i);
     assert.ok(extIdMatch, `Failed to extract extension ID from ${swUrl}`);
     const extensionId = extIdMatch[1];
-    console.log(`[E2E] Loaded SubFlow MV3 extension: ${extensionId}`);
+    console.log(`[E2E] Loaded BetterSubtitle MV3 extension: ${extensionId}`);
 
     // 2. Test Popup UI thoroughly
     const popupPage = await context.newPage();
