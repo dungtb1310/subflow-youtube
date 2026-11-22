@@ -337,7 +337,20 @@ async function run() {
     const feedbackText = await popupPage.textContent('#connection-result');
     assert.match(feedbackText ?? '', /Offline sentence merger is ready/i);
 
-    // Switch to Style tab & verify live preview updates
+    // Test Live Audio tab UI controls
+    await popupPage.click('#tab-live');
+    assert.equal(await popupPage.isVisible('#panel-live'), true);
+    assert.equal(await popupPage.getAttribute('[data-live-engine="gemini-live"]', 'aria-pressed'), 'true');
+    await popupPage.click('[data-live-engine="local-whisper"]');
+    assert.equal(await popupPage.isVisible('#live-config-whisper'), true);
+    assert.equal(await popupPage.inputValue('#local-whisper-url'), 'http://localhost:8765');
+    await popupPage.selectOption('#live-source-lang', 'en');
+    await popupPage.click('[data-live-engine="gemini-live"]');
+    if (SCREENSHOT_DIR) {
+      await popupPage.screenshot({ path: path.join(SCREENSHOT_DIR, 'popup-live.png') });
+    }
+
+    // Switch back to Style tab & verify live preview updates
     await popupPage.click('#tab-style');
     assert.equal(await popupPage.isVisible('#panel-style'), true);
     await popupPage.click('[data-dual-order="translated-top"]');
@@ -451,8 +464,153 @@ async function run() {
       return el && getComputedStyle(el).opacity === '0';
     }, { timeout: 5000 });
 
+    // 4. Test Live Audio overlay flow on YouTube (Listening chip -> Interim cue -> Finalized Dual cue -> Resume VOD)
+    await popupPage.click('#tab-subtitles');
+    await popupPage.click('[data-mode="dual"]');
+    await popupPage.waitForTimeout(180);
+
+    const ytTabId = await serviceWorker.evaluate(async () => {
+      const tabs = await chrome.tabs.query({ url: 'https://www.youtube.com/watch*' });
+      return tabs[0]?.id ?? null;
+    });
+    assert.ok(ytTabId, 'Service worker must locate active YouTube tab');
+
+    // 4a. Live listening state (no cue yet) -> status chip shows "Live Audio: Listening..."
+    await serviceWorker.evaluate(async (tabId) => {
+      await chrome.tabs.sendMessage(tabId, {
+        type: 'LIVE_SESSION_STATE',
+        payload: { active: true, state: 'listening' },
+      });
+    }, ytTabId);
+
+    await ytPage.waitForFunction(() => {
+      const host = document.getElementById('subflow-overlay-root');
+      const chip = host?.shadowRoot?.querySelector('.sf-status-chip');
+      return Boolean(chip?.classList.contains('visible') && chip.textContent?.includes('Listening'));
+    }, undefined, { timeout: 5000 });
+
+    // 4b. Interim live transcript -> shows dimmed interim cue & hides "Listening..." chip
+    await serviceWorker.evaluate(async (tabId) => {
+      await chrome.tabs.sendMessage(tabId, {
+        type: 'LIVE_SUBTITLE_UPDATE',
+        payload: {
+          id: 'live-1',
+          original: 'Welcome everyone to the live stream tonight',
+          isFinal: false,
+          timestampMs: 1200,
+        },
+      });
+    }, ytTabId);
+
+    await ytPage.waitForFunction(() => {
+      const host = document.getElementById('subflow-overlay-root');
+      const box = host?.shadowRoot?.querySelector('.sf-cue-box');
+      const primary = host?.shadowRoot?.querySelector('.sf-line-primary')?.textContent ?? '';
+      const chip = host?.shadowRoot?.querySelector('.sf-status-chip');
+      return (
+        Boolean(box?.classList.contains('is-interim')) &&
+        primary.includes('Welcome everyone') &&
+        !chip?.classList.contains('visible')
+      );
+    }, undefined, { timeout: 5000 });
+
+    // 4c. Finalized Dual live cue -> clears interim class & renders both original + Vietnamese translation
+    await serviceWorker.evaluate(async (tabId) => {
+      await chrome.tabs.sendMessage(tabId, {
+        type: 'LIVE_SUBTITLE_UPDATE',
+        payload: {
+          id: 'live-1',
+          original: 'Welcome everyone to the live stream tonight!',
+          translated: 'Chào mừng mọi người đến với buổi livestream tối nay!',
+          isFinal: true,
+          timestampMs: 1200,
+        },
+      });
+    }, ytTabId);
+
+    await ytPage.waitForFunction(() => {
+      const host = document.getElementById('subflow-overlay-root');
+      const box = host?.shadowRoot?.querySelector('.sf-cue-box');
+      const primary = host?.shadowRoot?.querySelector('.sf-line-primary')?.textContent ?? '';
+      const secondary = host?.shadowRoot?.querySelector('.sf-line-secondary')?.textContent ?? '';
+      return (
+        Boolean(box && !box.classList.contains('is-interim')) &&
+        primary === 'Welcome everyone to the live stream tonight!' &&
+        secondary === 'Chào mừng mọi người đến với buổi livestream tối nay!'
+      );
+    }, undefined, { timeout: 5000 });
+
+    if (SCREENSHOT_DIR) {
+      await ytPage.click('#subflow-player-toggle-btn'); // close quick popover for clean overlay shot
+      await ytPage.waitForTimeout(220);
+      await ytPage.screenshot({ path: path.join(SCREENSHOT_DIR, 'youtube-live-overlay.png') });
+    }
+
+    // 4d. Stop Live Audio -> VOD subtitle resumes cleanly
+    await popupPage.click('[data-mode="original"]');
+    await popupPage.waitForTimeout(160);
+    await serviceWorker.evaluate(async (tabId) => {
+      await chrome.tabs.sendMessage(tabId, {
+        type: 'LIVE_SESSION_STATE',
+        payload: { active: false, state: 'idle' },
+      });
+    }, ytTabId);
+
+    await ytPage.waitForFunction(() => {
+      const host = document.getElementById('subflow-overlay-root');
+      const txt = host?.shadowRoot?.querySelector('.sf-line-primary')?.textContent ?? '';
+      return txt === 'Subflow merges them cleanly into real readable lines';
+    }, undefined, { timeout: 5000 });
+
     assert.equal(ytErrors.length, 0, `YouTube content script errors: ${ytErrors.join('; ')}`);
-    console.log('[E2E] YouTube content script, Shadow DOM overlay, sentence merging, native caption suppression, Quick Switcher, and Alt+S shortcut PASSED');
+    console.log('[E2E] YouTube content script, Shadow DOM overlay, sentence merging, native caption suppression, Quick Switcher, Alt+S, and Live Audio overlay PASSED');
+
+    // 5. Test universal live-overlay.js on a non-YouTube livestream tab (e.g. Twitch/Kick)
+    const livePage = await context.newPage();
+    await livePage.setViewportSize({ width: 1080, height: 680 });
+    const liveErrors = [];
+    livePage.on('pageerror', (e) => liveErrors.push(e.message));
+
+    await context.route('http://localhost:9999/*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/html; charset=utf-8',
+        body: '<!DOCTYPE html><html><body style="margin:0;background:#12151f;color:#fff;font-family:sans-serif;padding:32px;"><h1>Universal Livestream Tab</h1></body></html>',
+      });
+    });
+
+    await livePage.goto('http://localhost:9999/stream', { waitUntil: 'domcontentloaded' });
+    const liveTabId = await serviceWorker.evaluate(async () => {
+      const tabs = await chrome.tabs.query({ url: 'http://localhost:9999/*' });
+      return tabs[0]?.id ?? null;
+    });
+    assert.ok(liveTabId, 'Service worker must locate non-YouTube live tab');
+
+    await serviceWorker.evaluate(async (tabId) => {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['live-overlay.js'],
+      });
+      await chrome.tabs.sendMessage(tabId, {
+        type: 'LIVE_SUBTITLE_UPDATE',
+        payload: {
+          id: 'u-1',
+          original: 'Works on Twitch, Kick, or any audio tab!',
+          translated: 'Hoạt động trên Twitch, Kick hoặc bất kỳ tab nào!',
+          isFinal: true,
+          timestampMs: 500,
+        },
+      });
+    }, liveTabId);
+
+    await livePage.waitForFunction(() => {
+      const host = document.getElementById('bettersubtitle-universal-live-overlay');
+      const primary = host?.shadowRoot?.querySelector('.bs-primary')?.textContent ?? '';
+      return primary === 'Works on Twitch, Kick, or any audio tab!';
+    }, undefined, { timeout: 5000 });
+
+    assert.equal(liveErrors.length, 0, `Universal live-overlay errors: ${liveErrors.join('; ')}`);
+    console.log('[E2E] Universal non-YouTube live-overlay.js injection & rendering PASSED');
   } finally {
     if (context) {
       await context.close().catch(() => {});

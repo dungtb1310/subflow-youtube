@@ -47,6 +47,9 @@ Chrome & Edge (Manifest V3) extension that replaces YouTube's choppy word-by-wor
   - **Ollama (Local)**: Free, private local processing (`http://localhost:11434`) with one-click model discovery (recommended: `qwen2.5:7b` or `gemma3:4b`).
   - **OpenAI-Compatible**: Built-in presets for OpenAI, Groq, OpenRouter, LM Studio, or any custom `/v1` endpoint.
 - **Seek-aware processing & IndexedDB cache**: Prioritizes the exact segment you seek to, prefetches upcoming chunks, and caches processed subtitles locally for 14 days.
+- **Live Audio Capture (Livestreams & Videos Without CC)**:
+  - Captures tab audio in real time (`chrome.tabCapture` + MV3 Offscreen Audio) without muting your speakers — works on **YouTube Livestreams**, videos without captions, **Twitch, Kick, Facebook Live**, and any browser tab with audio!
+  - Choose **Gemini Live (`gemini-3.5-transcribe-live`)** for zero-setup cloud streaming transcription, or **Local GPU Whisper (`server/live_whisper_server.py`)** for unlimited 100% free GPU transcription on your machine.
 - **Cinema-grade overlay**:
   - Trusted-Types-safe Shadow DOM overlay that suppresses YouTube's native captions while active (and restores them when toggled off).
   - Drag subtitles vertically to adjust height; optional hover-to-pause for language learning.
@@ -110,6 +113,16 @@ You can also trigger a release manually from the **Actions → Release Extension
    ollama pull gemma3:4b
    ```
 3. Open **BetterSubtitle** → **AI Engine** → select **Ollama** → click **Scan** → **Test Connection**.
+
+### Local GPU Whisper Server (Optional — Unlimited Free Live Audio Mode)
+For unlimited, zero-cost livestream speech-to-text on your own GPU (works with `faster-whisper` or `openai-whisper`):
+
+```bash
+pip install -r server/requirements.txt
+python server/live_whisper_server.py --model small --port 8765
+```
+
+Then open **BetterSubtitle** → **Live** tab → select **Local Whisper** → click **Test** → **Start Live Audio Capture** on any YouTube Live or Twitch tab!
 
 ---
 

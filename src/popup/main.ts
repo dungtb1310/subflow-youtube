@@ -1,5 +1,6 @@
 import {
   GEMINI_MODEL_PRESETS,
+  LIVE_SOURCE_LANGUAGES,
   OPENAI_PRESETS,
   SUPPORTED_LANGUAGES,
 } from '../shared/constants';
@@ -11,6 +12,8 @@ import type {
   DualOrder,
   ExportSrtResponse,
   ListOllamaModelsResponse,
+  LiveSessionStatus,
+  LiveSttEngine,
   RuntimeStatus,
   SubFlowSettings,
   SubtitleMode,
@@ -113,8 +116,45 @@ async function initPopup(): Promise<void> {
   const tabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.tab-btn'));
   const panels: Record<string, HTMLElement> = {
     subtitles: qs<HTMLElement>('#panel-subtitles'),
+    live: qs<HTMLElement>('#panel-live'),
     ai: qs<HTMLElement>('#panel-ai'),
     style: qs<HTMLElement>('#panel-style'),
+  };
+
+  // Live Audio tab controls
+  const liveTabDot = qs<HTMLSpanElement>('#live-tab-dot');
+  const liveToggleBtn = qs<HTMLButtonElement>('#live-toggle-btn');
+  const liveToggleLabel = qs<HTMLSpanElement>('#live-toggle-label');
+  const liveStateText = qs<HTMLSpanElement>('#live-state-text');
+  const liveMeterRow = qs<HTMLDivElement>('#live-meter-row');
+  const liveMeterFill = qs<HTMLDivElement>('#live-meter-fill');
+  const liveElapsedEl = qs<HTMLSpanElement>('#live-elapsed');
+  const liveEngineButtons = Array.from(
+    document.querySelectorAll<HTMLButtonElement>('[data-live-engine]'),
+  );
+  const liveSourceLangSelect = qs<HTMLSelectElement>('#live-source-lang');
+  const liveConfigGemini = qs<HTMLDivElement>('#live-config-gemini');
+  const liveGeminiMissingKey = qs<HTMLDivElement>('#live-gemini-missing-key');
+  const liveJumpAiBtn = qs<HTMLButtonElement>('#live-jump-ai-btn');
+  const liveConfigWhisper = qs<HTMLDivElement>('#live-config-whisper');
+  const localWhisperUrlInput = qs<HTMLInputElement>('#local-whisper-url');
+  const testWhisperBtn = qs<HTMLButtonElement>('#test-whisper-btn');
+  const liveFeedbackEl = qs<HTMLDivElement>('#live-feedback');
+  const exportLiveSrtBtn = qs<HTMLButtonElement>('#export-live-srt-btn');
+  const liveLatestOrigEl = qs<HTMLDivElement>('#live-latest-orig');
+  const liveLatestTransEl = qs<HTMLDivElement>('#live-latest-trans');
+
+  let liveStatus: LiveSessionStatus = {
+    active: false,
+    tabId: null,
+    tabTitle: '',
+    engine: settings.liveEngine,
+    state: 'idle',
+    audioLevel: 0,
+    startedAt: null,
+    cueCount: 0,
+    latestOriginal: '',
+    latestTranslated: '',
   };
 
   // Subtitles tab controls
@@ -210,13 +250,83 @@ async function initPopup(): Promise<void> {
     openaiPresetsEl.appendChild(chip);
   }
 
-  function switchTab(tabId: 'subtitles' | 'ai' | 'style'): void {
+  for (const lang of LIVE_SOURCE_LANGUAGES) {
+    const opt = document.createElement('option');
+    opt.value = lang.code;
+    opt.textContent = lang.label;
+    liveSourceLangSelect.appendChild(opt);
+  }
+
+  function switchTab(tabId: 'subtitles' | 'live' | 'ai' | 'style'): void {
     for (const btn of tabButtons) {
       const selected = btn.dataset.tab === tabId;
       btn.setAttribute('aria-selected', String(selected));
     }
     for (const [id, panel] of Object.entries(panels)) {
       panel.classList.toggle('hidden', id !== tabId);
+    }
+  }
+
+  function showLiveFeedback(text: string, tone: 'ok' | 'err' | 'neutral' = 'neutral'): void {
+    liveFeedbackEl.textContent = text;
+    liveFeedbackEl.classList.remove('hidden', 'ok', 'err');
+    if (tone === 'ok') liveFeedbackEl.classList.add('ok');
+    if (tone === 'err') liveFeedbackEl.classList.add('err');
+  }
+
+  function formatElapsed(startedAt: number | null): string {
+    if (!startedAt) return '00:00';
+    const sec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+    const ss = String(sec % 60).padStart(2, '0');
+    return `${mm}:${ss}`;
+  }
+
+  function renderLiveStatus(): void {
+    const active = liveStatus.active;
+    liveTabDot.classList.toggle('hidden', !active);
+
+    if (active) {
+      liveToggleBtn.classList.remove('btn-primary', 'btn-live-start');
+      liveToggleBtn.classList.add('btn-live-stop');
+      liveToggleLabel.textContent = 'Stop Live Audio Capture';
+      liveMeterRow.classList.remove('hidden');
+      liveMeterFill.style.width = `${Math.round(Math.min(1, Math.max(0.04, liveStatus.audioLevel)) * 100)}%`;
+      liveElapsedEl.textContent = `${formatElapsed(liveStatus.startedAt)} · ${liveStatus.cueCount} cue${liveStatus.cueCount === 1 ? '' : 's'}`;
+
+      const tabLabel = liveStatus.tabTitle ? ` (${liveStatus.tabTitle.slice(0, 32)})` : '';
+      if (liveStatus.state === 'connecting') {
+        liveStateText.textContent = `Connecting live audio${tabLabel}...`;
+      } else if (liveStatus.state === 'reconnecting') {
+        liveStateText.textContent = `Reconnecting live audio${tabLabel}...`;
+      } else {
+        liveStateText.textContent = `Listening to active tab${tabLabel}`;
+      }
+
+      headerStatus.textContent = 'Live';
+      headerStatus.dataset.tone = 'active';
+    } else {
+      liveToggleBtn.classList.remove('btn-live-stop');
+      liveToggleBtn.classList.add('btn-primary', 'btn-live-start');
+      liveToggleLabel.textContent = 'Start Live Audio Capture';
+      liveMeterRow.classList.add('hidden');
+      liveStateText.textContent =
+        'Captures audio from the active tab (YouTube Live, Twitch, videos without CC).';
+    }
+
+    if (liveStatus.state === 'error' && liveStatus.error) {
+      showLiveFeedback(liveStatus.error, 'err');
+    }
+
+    exportLiveSrtBtn.disabled = liveStatus.cueCount === 0;
+    liveLatestOrigEl.textContent =
+      liveStatus.latestOriginal || (active ? 'Listening for speech...' : 'Waiting for live audio...');
+    if (liveStatus.latestTranslated) {
+      liveLatestTransEl.textContent = liveStatus.latestTranslated;
+      liveLatestTransEl.classList.remove('hidden');
+    } else {
+      liveLatestTransEl.textContent = '';
+      liveLatestTransEl.classList.add('hidden');
     }
   }
 
@@ -333,6 +443,20 @@ async function initPopup(): Promise<void> {
     hideNativeToggle.checked = settings.hideNativeCaptions;
     pauseHoverToggle.checked = settings.pauseOnHover;
 
+    for (const btn of liveEngineButtons) {
+      btn.setAttribute('aria-pressed', String(btn.dataset.liveEngine === settings.liveEngine));
+    }
+    liveSourceLangSelect.value = settings.liveSourceLanguage;
+    liveConfigGemini.classList.toggle('hidden', settings.liveEngine !== 'gemini-live');
+    liveConfigWhisper.classList.toggle('hidden', settings.liveEngine !== 'local-whisper');
+    liveGeminiMissingKey.classList.toggle(
+      'hidden',
+      settings.liveEngine !== 'gemini-live' || settings.geminiApiKey.trim().length > 0,
+    );
+    if (document.activeElement !== localWhisperUrlInput) {
+      localWhisperUrlInput.value = settings.localWhisperUrl;
+    }
+
     renderPreview();
   }
 
@@ -406,9 +530,138 @@ async function initPopup(): Promise<void> {
   // Bind events
   for (const btn of tabButtons) {
     btn.addEventListener('click', () => {
-      switchTab((btn.dataset.tab as 'subtitles' | 'ai' | 'style') || 'subtitles');
+      switchTab((btn.dataset.tab as 'subtitles' | 'live' | 'ai' | 'style') || 'subtitles');
     });
   }
+
+  // Live Audio controls
+  for (const btn of liveEngineButtons) {
+    btn.addEventListener('click', () => {
+      const liveEngine = btn.dataset.liveEngine as LiveSttEngine;
+      liveFeedbackEl.classList.add('hidden');
+      void commitPatch({ liveEngine });
+    });
+  }
+
+  liveSourceLangSelect.addEventListener('change', () => {
+    void commitPatch({ liveSourceLanguage: liveSourceLangSelect.value });
+  });
+
+  liveJumpAiBtn.addEventListener('click', () => {
+    void commitPatch({ provider: 'gemini' });
+    switchTab('ai');
+  });
+
+  localWhisperUrlInput.addEventListener('input', () => {
+    schedulePatch({ localWhisperUrl: localWhisperUrlInput.value.trim() });
+  });
+
+  testWhisperBtn.addEventListener('click', async () => {
+    testWhisperBtn.disabled = true;
+    testWhisperBtn.textContent = 'Testing...';
+    showLiveFeedback('Checking Local Whisper server...', 'neutral');
+    try {
+      const url = localWhisperUrlInput.value.trim() || 'http://localhost:8765';
+      await commitPatch({ localWhisperUrl: url });
+      const res = await sendBackground<TestConnectionResponse>({
+        type: 'TEST_LOCAL_WHISPER',
+        payload: { localWhisperUrl: url },
+      });
+      showLiveFeedback(res.message, res.ok ? 'ok' : 'err');
+    } catch (err) {
+      showLiveFeedback(err instanceof Error ? err.message : 'Server check failed.', 'err');
+    } finally {
+      testWhisperBtn.disabled = false;
+      testWhisperBtn.textContent = 'Test';
+    }
+  });
+
+  liveToggleBtn.addEventListener('click', async () => {
+    liveFeedbackEl.classList.add('hidden');
+    if (liveStatus.active) {
+      liveToggleBtn.disabled = true;
+      try {
+        const res = await sendBackground<{ ok: boolean; status?: LiveSessionStatus }>({
+          type: 'STOP_LIVE_AUDIO',
+        });
+        if (res.status) liveStatus = res.status;
+        renderLiveStatus();
+        await refreshActiveVideoStatus();
+      } finally {
+        liveToggleBtn.disabled = false;
+      }
+      return;
+    }
+
+    liveToggleBtn.disabled = true;
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tab = tabs[0];
+      if (!tab?.id || !tab.url || /^(chrome|edge|chrome-extension|about):/i.test(tab.url)) {
+        showLiveFeedback(
+          'Open a video or livestream tab (YouTube, Twitch, etc.) before starting Live Audio.',
+          'err',
+        );
+        return;
+      }
+
+      if (settings.liveEngine === 'gemini-live' && !settings.geminiApiKey.trim()) {
+        showLiveFeedback(
+          'Add your Gemini API key in the AI Engine tab first, or switch to Local Whisper.',
+          'err',
+        );
+        return;
+      }
+
+      if (!chrome.tabCapture?.getMediaStreamId) {
+        showLiveFeedback('Tab audio capture is not supported in this browser.', 'err');
+        return;
+      }
+
+      const streamId = await new Promise<string>((resolve, reject) => {
+        chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id }, (id) => {
+          if (chrome.runtime.lastError || !id) {
+            reject(
+              new Error(chrome.runtime.lastError?.message || 'Could not obtain tab audio stream.'),
+            );
+            return;
+          }
+          resolve(id);
+        });
+      });
+
+      const res = await sendBackground<{
+        ok: boolean;
+        status?: LiveSessionStatus;
+        error?: string;
+      }>({
+        type: 'START_LIVE_AUDIO',
+        payload: {
+          tabId: tab.id,
+          tabTitle: tab.title || 'Live Tab',
+          tabUrl: tab.url,
+          streamId,
+        },
+      });
+
+      if (res.status) liveStatus = res.status;
+      if (!res.ok) {
+        showLiveFeedback(res.error || 'Failed to start Live Audio.', 'err');
+      }
+      renderLiveStatus();
+    } catch (err) {
+      showLiveFeedback(err instanceof Error ? err.message : 'Failed to capture tab audio.', 'err');
+    } finally {
+      liveToggleBtn.disabled = false;
+    }
+  });
+
+  exportLiveSrtBtn.addEventListener('click', async () => {
+    const resp = await sendBackground<ExportSrtResponse>({ type: 'EXPORT_LIVE_SRT' });
+    if (resp?.ok && resp.srt && resp.filename) {
+      triggerFileDownload(resp.filename, resp.srt);
+    }
+  });
 
   masterToggle.addEventListener('click', () => {
     void commitPatch({ enabled: !settings.enabled }).then(refreshActiveVideoStatus);
@@ -619,11 +872,26 @@ async function initPopup(): Promise<void> {
     void commitPatch({ pauseOnHover: pauseHoverToggle.checked });
   });
 
+  async function refreshLiveStatus(): Promise<void> {
+    try {
+      const next = await sendBackground<LiveSessionStatus>({ type: 'GET_LIVE_STATUS' });
+      if (next && typeof next.active === 'boolean') {
+        liveStatus = next;
+        renderLiveStatus();
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   renderSettings();
-  await refreshActiveVideoStatus();
+  await Promise.all([refreshActiveVideoStatus(), refreshLiveStatus()]);
   window.setInterval(() => {
-    void refreshActiveVideoStatus();
-  }, 1400);
+    void refreshLiveStatus();
+    if (!liveStatus.active) {
+      void refreshActiveVideoStatus();
+    }
+  }, 550);
 }
 
 void initPopup();

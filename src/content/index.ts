@@ -29,10 +29,18 @@ async function bootstrap(): Promise<void> {
     },
   });
 
+  let liveAudioActive = false;
+
   const manager = new SubtitleManager(settings, {
-    onCueChange: (cue) => overlay.setCue(cue),
+    onCueChange: (cue) => {
+      if (!liveAudioActive) {
+        overlay.setCue(cue);
+      }
+    },
     onStatusChange: (status) => {
-      overlay.setStatus(status);
+      if (!liveAudioActive) {
+        overlay.setStatus(status);
+      }
       playerControl.setStatus(status);
     },
   });
@@ -72,6 +80,35 @@ async function bootstrap(): Promise<void> {
           .then(() => sendResponse({ ok: true }))
           .catch(() => sendResponse({ ok: false }));
         return true;
+      }
+      if (message.type === 'LIVE_SESSION_STATE') {
+        const wasLive = liveAudioActive;
+        liveAudioActive = message.payload.active;
+        if (message.payload.active && !wasLive) {
+          overlay.setCue(null);
+        }
+        overlay.setLiveState(message.payload.active ? message.payload : null);
+        if (!message.payload.active) {
+          overlay.setCue(null);
+          manager.updateSettings(settings);
+        }
+        sendResponse({ ok: true });
+        return false;
+      }
+      if (message.type === 'LIVE_SUBTITLE_UPDATE') {
+        liveAudioActive = true;
+        overlay.setLiveState({ active: true, state: 'listening' });
+        overlay.setCue({
+          id: message.payload.id,
+          startMs: message.payload.timestampMs,
+          endMs: message.payload.timestampMs + 4000,
+          original: message.payload.original,
+          translated: message.payload.translated,
+          source: 'live',
+          isInterim: !message.payload.isFinal,
+        });
+        sendResponse({ ok: true });
+        return false;
       }
       return false;
     });

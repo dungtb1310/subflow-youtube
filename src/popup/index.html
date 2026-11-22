@@ -39,6 +39,12 @@
         <button type="button" class="tab-btn" role="tab" id="tab-subtitles" aria-selected="true" aria-controls="panel-subtitles" data-tab="subtitles">
           Subtitles
         </button>
+        <button type="button" class="tab-btn" role="tab" id="tab-live" aria-selected="false" aria-controls="panel-live" data-tab="live">
+          <span class="tab-label-inline">
+            <span id="live-tab-dot" class="live-tab-dot hidden" aria-hidden="true"></span>
+            Live
+          </span>
+        </button>
         <button type="button" class="tab-btn" role="tab" id="tab-ai" aria-selected="false" aria-controls="panel-ai" data-tab="ai">
           AI Engine
         </button>
@@ -104,6 +110,91 @@
           <div class="footer-note">
             <span>Shortcut on YouTube: <kbd>Alt</kbd> + <kbd>S</kbd></span>
             <span id="active-engine-badge" class="mono-badge">Offline</span>
+          </div>
+        </section>
+
+        <!-- PANEL 1.5: Live Audio Capture -->
+        <section id="panel-live" class="panel hidden" role="tabpanel" aria-labelledby="tab-live">
+          <div class="live-control-bar">
+            <button type="button" id="live-toggle-btn" class="btn btn-primary btn-live-start">
+              <svg viewBox="0 0 18 18" width="15" height="15" fill="none" aria-hidden="true">
+                <rect x="6.5" y="2.5" width="5" height="8.5" rx="2.5" stroke="currentColor" stroke-width="1.6" />
+                <path d="M4 8.5a5 5 0 0 0 10 0M9 13.5v2.5M6.5 16h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+              </svg>
+              <span id="live-toggle-label">Start Live Audio Capture</span>
+            </button>
+
+            <div class="live-telemetry">
+              <span id="live-state-text" class="live-state-text">Captures audio from the active tab (YouTube Live, Twitch, videos without CC).</span>
+              <div id="live-meter-row" class="live-meter-row hidden">
+                <div class="meter-track" aria-hidden="true">
+                  <div id="live-meter-fill" class="meter-fill"></div>
+                </div>
+                <span id="live-elapsed" class="live-stats">00:00 · 0 cues</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label class="field-label">Speech-to-Text Engine</label>
+            <div class="provider-grid" role="radiogroup" aria-label="Live speech-to-text engine">
+              <button type="button" class="provider-btn" data-live-engine="gemini-live" aria-pressed="true">
+                <span class="provider-name">Gemini Live</span>
+                <span class="provider-sub">Cloud · Zero setup</span>
+              </button>
+              <button type="button" class="provider-btn" data-live-engine="local-whisper" aria-pressed="false">
+                <span class="provider-name">Local Whisper</span>
+                <span class="provider-sub">Free GPU · Unlimited</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label class="field-label" for="live-source-lang">Spoken Language</label>
+            <select id="live-source-lang" class="select"></select>
+          </div>
+
+          <!-- Gemini Live Info -->
+          <div id="live-config-gemini" class="provider-config">
+            <div id="live-gemini-missing-key" class="notice hidden" role="note">
+              <svg viewBox="0 0 20 20" width="16" height="16" fill="none" aria-hidden="true">
+                <circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.6" />
+                <line x1="10" y1="6.4" x2="10" y2="10.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+                <circle cx="10" cy="13.6" r="1" fill="currentColor" />
+              </svg>
+              <div class="notice-body">
+                <span>Gemini API key is required for Gemini Live audio transcription.</span>
+                <button type="button" id="live-jump-ai-btn" class="link-btn">Add Gemini API Key</button>
+              </div>
+            </div>
+            <p class="field-hint">
+              Streams 16kHz tab audio via <code>gemini-3.5-transcribe-live</code> (smart punctuation) and translates with your active Display Mode &amp; Target Language.
+            </p>
+          </div>
+
+          <!-- Local Whisper Server Config -->
+          <div id="live-config-whisper" class="provider-config hidden">
+            <div class="field-group">
+              <label class="field-label" for="local-whisper-url">Local Whisper Server URL</label>
+              <div class="input-row">
+                <input id="local-whisper-url" type="url" class="input" placeholder="http://localhost:8765" autocomplete="off" />
+                <button type="button" id="test-whisper-btn" class="btn btn-secondary btn-compact">Test</button>
+              </div>
+              <p class="field-hint">
+                Run <code>python server/live_whisper_server.py</code> for unlimited free GPU transcription.
+              </p>
+            </div>
+          </div>
+
+          <div id="live-feedback" class="feedback hidden" role="status" aria-live="polite"></div>
+
+          <div class="live-transcript-strip">
+            <div class="live-transcript-head">
+              <span class="field-label">Latest Live Line</span>
+              <button type="button" id="export-live-srt-btn" class="link-btn" disabled>Export Live .SRT</button>
+            </div>
+            <div id="live-latest-orig" class="live-line-orig">Waiting for live audio...</div>
+            <div id="live-latest-trans" class="live-line-trans hidden"></div>
           </div>
         </section>
 
