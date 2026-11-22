@@ -109,6 +109,69 @@ describe('ai-client', () => {
     ).rejects.toThrow(/OLLAMA_ORIGINS/);
   });
 
+  it('automatically falls back to another Gemini model when primary returns 503 high demand', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        text: async () =>
+          JSON.stringify({
+            error: {
+              message: 'gemini-3.5-flash-lite is currently experiencing high demand',
+              code: 'service_unavailable',
+            },
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: 'v1_fb',
+          status: 'completed',
+          steps: [
+            {
+              type: 'model_output',
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    cues: [
+                      {
+                        startWord: 0,
+                        endWord: 3,
+                        original: 'Hello world, this works.',
+                        translated: 'Xin chào thế giới, chạy ngon.',
+                      },
+                    ],
+                  }),
+                },
+              ],
+            },
+          ],
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const cues = await processTranscriptChunk({
+      words: SAMPLE_WORDS,
+      sourceLanguage: 'en',
+      targetLanguage: 'vi',
+      mode: 'dual',
+      settings: {
+        ...DEFAULT_SETTINGS,
+        provider: 'gemini',
+        geminiApiKey: 'test-gemini-key',
+        geminiModel: 'gemini-3.5-flash-lite',
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(secondBody.model).toBe('gemini-3.1-flash-lite');
+    expect(cues[0].translated).toBe('Xin chào thế giới, chạy ngon.');
+  });
+
   it('passes offline connection test immediately without network calls', async () => {
     const res = await testProviderConnection({
       ...DEFAULT_SETTINGS,

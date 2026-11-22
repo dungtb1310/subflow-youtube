@@ -201,27 +201,54 @@ function extractGeminiInteractionText(data: GeminiInteractionResponse): string {
   return '';
 }
 
-async function callGeminiInteractions(params: {
+const GEMINI_FALLBACK_MODELS = [
+  'gemini-3.1-flash-lite',
+  'gemini-3.8-flash',
+  'gemini-4-hydrogen',
+  'gemini-3.5-flash-lite',
+];
+
+const GEMINI_BUSY_COOLDOWN_MS = 120_000;
+const geminiBusyUntil = new Map<string, number>();
+
+function parseApiErrorMessage(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      error?: { message?: string } | Array<{ error?: { message?: string } }>;
+    };
+    if (Array.isArray(parsed) && parsed[0]?.error?.message) {
+      return String(parsed[0].error.message);
+    }
+    if (parsed?.error && !Array.isArray(parsed.error) && parsed.error.message) {
+      return String(parsed.error.message);
+    }
+  } catch {
+    // not JSON
+  }
+  return trimmed.slice(0, 180);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function callSingleGeminiModel(params: {
   apiKey: string;
   model: string;
   systemInstruction: string;
   userPrompt: string;
   schema: Record<string, unknown>;
-}): Promise<string> {
-  const apiKey = params.apiKey.trim();
-  if (!apiKey) {
-    throw new Error('Gemini API key is missing. Add your key in SubFlow Settings.');
-  }
-
-  const model = params.model.trim() || 'gemini-3.5-flash-lite';
+}): Promise<{ ok: true; text: string } | { ok: false; status: number; message: string }> {
   const res = await fetchWithTimeout('https://generativelanguage.googleapis.com/v1/interactions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-goog-api-key': apiKey,
+      'x-goog-api-key': params.apiKey,
     },
     body: JSON.stringify({
-      model,
+      model: params.model,
       system_instruction: params.systemInstruction,
       input: params.userPrompt,
       store: false,
@@ -239,21 +266,108 @@ async function callGeminiInteractions(params: {
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
-    if (res.status === 401 || res.status === 403) {
-      throw new Error('Gemini API key was rejected. Check your key in Google AI Studio.');
-    }
-    if (res.status === 429) {
-      throw new Error('Gemini API rate limit reached. Wait a moment or switch to Flash-Lite / Ollama.');
-    }
-    throw new Error(`Gemini API error (${res.status}): ${errBody.slice(0, 220)}`);
+    return {
+      ok: false,
+      status: res.status,
+      message: parseApiErrorMessage(errBody) || `HTTP ${res.status}`,
+    };
   }
 
   const data = (await res.json()) as GeminiInteractionResponse;
   const text = extractGeminiInteractionText(data);
   if (!text) {
-    throw new Error('Gemini API returned an empty interaction output.');
+    return { ok: false, status: 502, message: 'Gemini API returned an empty output.' };
   }
-  return text;
+  return { ok: true, text };
+}
+
+async function callGeminiInteractions(params: {
+  apiKey: string;
+  model: string;
+  systemInstruction: string;
+  userPrompt: string;
+  schema: Record<string, unknown>;
+  allowFallback?: boolean;
+}): Promise<{ text: string; usedModel: string }> {
+  const apiKey = params.apiKey.trim();
+  if (!apiKey) {
+    throw new Error('Gemini API key is missing. Add your key in SubFlow Settings.');
+  }
+
+  const primaryModel = params.model.trim() || 'gemini-3.5-flash-lite';
+  const now = Date.now();
+  const candidates = [primaryModel];
+
+  if (params.allowFallback !== false) {
+    for (const fb of GEMINI_FALLBACK_MODELS) {
+      if (!candidates.includes(fb)) candidates.push(fb);
+    }
+  }
+
+  // Move models that recently returned 503 to the end of the candidate queue during cooldown
+  const ordered = [
+    ...candidates.filter((m) => (geminiBusyUntil.get(m) ?? 0) <= now),
+    ...candidates.filter((m) => (geminiBusyUntil.get(m) ?? 0) > now),
+  ];
+
+  let lastStatus = 0;
+  let lastMessage = 'Gemini request failed.';
+
+  for (let i = 0; i < ordered.length; i++) {
+    const candidate = ordered[i];
+    const attempt = await callSingleGeminiModel({
+      apiKey,
+      model: candidate,
+      systemInstruction: params.systemInstruction,
+      userPrompt: params.userPrompt,
+      schema: params.schema,
+    });
+
+    if (attempt.ok) {
+      geminiBusyUntil.delete(candidate);
+      return { text: attempt.text, usedModel: candidate };
+    }
+
+    lastStatus = attempt.status;
+    lastMessage = attempt.message;
+
+    if (attempt.status === 401 || attempt.status === 403) {
+      throw new Error('Gemini API key was rejected. Check your key in Google AI Studio.');
+    }
+
+    // Retry / fallback on transient overload (503/500/502/504) or per-model quota spike (429)
+    const isTransient =
+      attempt.status === 503 ||
+      attempt.status === 500 ||
+      attempt.status === 502 ||
+      attempt.status === 504 ||
+      attempt.status === 429;
+
+    if (!isTransient) {
+      throw new Error(`Gemini (${candidate}) error ${attempt.status}: ${attempt.message}`);
+    }
+
+    if (attempt.status === 503) {
+      geminiBusyUntil.set(candidate, Date.now() + GEMINI_BUSY_COOLDOWN_MS);
+    }
+
+    // Brief backoff before trying the next candidate model
+    if (i < ordered.length - 1) {
+      await sleep(attempt.status === 429 ? 700 : 350);
+    }
+  }
+
+  if (lastStatus === 429) {
+    throw new Error(
+      'Gemini free-tier rate limit reached. Wait a moment or switch to Ollama (Local).',
+    );
+  }
+  if (lastStatus === 503) {
+    throw new Error(
+      'Gemini servers are temporarily overloaded (503). Click Re-run in a moment or switch to Ollama.',
+    );
+  }
+  throw new Error(`Gemini API error (${lastStatus}): ${lastMessage}`);
 }
 
 async function callOllamaChat(params: {
@@ -395,15 +509,17 @@ export async function processTranscriptChunk(params: ProcessChunkParams): Promis
   let rawText: string;
 
   switch (params.settings.provider) {
-    case 'gemini':
-      rawText = await callGeminiInteractions({
+    case 'gemini': {
+      const geminiRes = await callGeminiInteractions({
         apiKey: params.settings.geminiApiKey,
         model: params.settings.geminiModel,
         systemInstruction,
         userPrompt,
         schema,
       });
+      rawText = geminiRes.text;
       break;
+    }
     case 'ollama':
       rawText = await callOllamaChat({
         ollamaUrl: params.settings.ollamaUrl,
@@ -512,9 +628,10 @@ export async function testProviderConnection(
       if (!settings.geminiApiKey.trim()) {
         return { ok: false, message: 'Enter your Gemini API key first.' };
       }
-      await callGeminiInteractions({
+      const preferred = settings.geminiModel || 'gemini-3.5-flash-lite';
+      const result = await callGeminiInteractions({
         apiKey: settings.geminiApiKey,
-        model: settings.geminiModel || 'gemini-3.5-flash-lite',
+        model: preferred,
         systemInstruction: 'Return {"ok":true} as JSON.',
         userPrompt: 'ping',
         schema: {
@@ -524,9 +641,13 @@ export async function testProviderConnection(
         },
       });
       const latencyMs = Date.now() - started;
+      const fallbackNote =
+        result.usedModel !== preferred
+          ? ` (auto-switched from busy ${preferred} → ${result.usedModel})`
+          : '';
       return {
         ok: true,
-        message: `Connected to Gemini (${settings.geminiModel}) in ${latencyMs}ms.`,
+        message: `Connected to Gemini (${result.usedModel}) in ${latencyMs}ms${fallbackNote}.`,
         latencyMs,
       };
     }
