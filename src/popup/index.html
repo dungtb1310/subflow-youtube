@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BetterSubtitle — Smart YouTube Subtitles</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <!-- Top Bar -->
+      <header class="topbar">
+        <div class="brand">
+          <svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
+            <rect x="2.5" y="4" width="19" height="16" rx="3.5" stroke="#3B4457" stroke-width="1.6" fill="#171B23" />
+            <circle cx="6.8" cy="8.2" r="1.4" fill="#F5B942" />
+            <line x1="10" y1="8.2" x2="17.5" y2="8.2" stroke="#647088" stroke-width="1.6" stroke-linecap="round" />
+            <line x1="6.2" y1="12.6" x2="17.8" y2="12.6" stroke="#F5B942" stroke-width="2" stroke-linecap="round" />
+            <line x1="6.2" y1="16.2" x2="14.2" y2="16.2" stroke="#F2F4F8" stroke-width="1.8" stroke-linecap="round" />
+          </svg>
+          <div class="brand-text">
+            <h1>BetterSubtitle</h1>
+            <span id="header-status" class="status-pill" data-tone="idle">Ready</span>
+          </div>
+        </div>
+        <button
+          id="master-toggle"
+          type="button"
+          class="switch"
+          role="switch"
+          aria-checked="true"
+          aria-label="Enable BetterSubtitle on YouTube"
+          title="Enable or disable BetterSubtitle (Alt+S on YouTube)"
+        ></button>
+      </header>
+
+      <!-- Tab Bar -->
+      <nav class="tabs" role="tablist" aria-label="BetterSubtitle sections">
+        <button type="button" class="tab-btn" role="tab" id="tab-subtitles" aria-selected="true" aria-controls="panel-subtitles" data-tab="subtitles">
+          Subtitles
+        </button>
+        <button type="button" class="tab-btn" role="tab" id="tab-ai" aria-selected="false" aria-controls="panel-ai" data-tab="ai">
+          AI Engine
+        </button>
+        <button type="button" class="tab-btn" role="tab" id="tab-style" aria-selected="false" aria-controls="panel-style" data-tab="style">
+          Style
+        </button>
+      </nav>
+
+      <!-- PANEL 1: Subtitles -->
+      <main class="panels">
+        <section id="panel-subtitles" class="panel" role="tabpanel" aria-labelledby="tab-subtitles">
+          <div class="field-group">
+            <label class="field-label">Display Mode</label>
+            <div class="segmented" role="group" aria-label="Subtitle display mode">
+              <button type="button" class="seg-btn" data-mode="original" aria-pressed="true">Original</button>
+              <button type="button" class="seg-btn" data-mode="dual" aria-pressed="false">Dual</button>
+              <button type="button" class="seg-btn" data-mode="translated" aria-pressed="false">Translated</button>
+            </div>
+            <p id="mode-hint" class="field-hint">
+              Merges word-by-word YouTube captions into clean sentences in the video's original language.
+            </p>
+          </div>
+
+          <div class="field-group" id="language-group">
+            <label class="field-label" for="target-language">Target Language</label>
+            <select id="target-language" class="select"></select>
+          </div>
+
+          <div id="offline-translate-notice" class="notice hidden" role="note">
+            <svg viewBox="0 0 20 20" width="16" height="16" fill="none" aria-hidden="true">
+              <circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.6" />
+              <line x1="10" y1="6.4" x2="10" y2="10.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+              <circle cx="10" cy="13.6" r="1" fill="currentColor" />
+            </svg>
+            <div class="notice-body">
+              <span>Offline mode cleans sentences only. Pick Gemini, Ollama, or OpenAI to translate.</span>
+              <button type="button" id="jump-ai-btn" class="link-btn">Configure AI</button>
+            </div>
+          </div>
+
+          <!-- Active Video Session Strip -->
+          <div class="video-strip">
+            <div class="video-strip-info">
+              <div id="video-title" class="video-title">No YouTube video active</div>
+              <div id="video-meta" class="video-meta">Open a YouTube video with captions to start.</div>
+            </div>
+            <div class="video-strip-actions">
+              <button type="button" id="export-srt-btn" class="btn btn-secondary" disabled>
+                <svg viewBox="0 0 18 18" width="14" height="14" fill="none" aria-hidden="true">
+                  <path d="M9 3v8.2m0 0L5.8 8m3.2 3.2L12.2 8M3.5 13.8h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                Export .SRT
+              </button>
+              <button type="button" id="reprocess-btn" class="btn btn-ghost" disabled title="Reprocess current video subtitles">
+                <svg viewBox="0 0 18 18" width="14" height="14" fill="none" aria-hidden="true">
+                  <path d="M14.5 9a5.5 5.5 0 1 1-1.3-3.55M14.5 3.5v2.8h-2.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                Re-run
+              </button>
+            </div>
+          </div>
+
+          <div class="footer-note">
+            <span>Shortcut on YouTube: <kbd>Alt</kbd> + <kbd>S</kbd></span>
+            <span id="active-engine-badge" class="mono-badge">Offline</span>
+          </div>
+        </section>
+
+        <!-- PANEL 2: AI Engine -->
+        <section id="panel-ai" class="panel hidden" role="tabpanel" aria-labelledby="tab-ai">
+          <div class="field-group">
+            <label class="field-label">Processing Engine</label>
+            <div class="provider-grid" role="radiogroup" aria-label="AI provider">
+              <button type="button" class="provider-btn" data-provider="offline" aria-pressed="true">
+                <span class="provider-name">Offline</span>
+                <span class="provider-sub">Instant local merge</span>
+              </button>
+              <button type="button" class="provider-btn" data-provider="gemini" aria-pressed="false">
+                <span class="provider-name">Gemini API</span>
+                <span class="provider-sub">Cloud · Fast</span>
+              </button>
+              <button type="button" class="provider-btn" data-provider="ollama" aria-pressed="false">
+                <span class="provider-name">Ollama</span>
+                <span class="provider-sub">Local · Free</span>
+              </button>
+              <button type="button" class="provider-btn" data-provider="openai" aria-pressed="false">
+                <span class="provider-name">OpenAI API</span>
+                <span class="provider-sub">OpenAI / Groq / LM</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Offline Details -->
+          <div id="config-offline" class="provider-config">
+            <p class="field-hint">
+              Uses pause detection and grammar heuristics right inside your browser to turn word-by-word captions into full readable cues instantly with zero API cost.
+            </p>
+          </div>
+
+          <!-- Gemini Config -->
+          <div id="config-gemini" class="provider-config hidden">
+            <div class="field-group">
+              <label class="field-label" for="gemini-api-key">Gemini API Key</label>
+              <div class="input-row">
+                <input id="gemini-api-key" type="password" class="input" placeholder="AIza..." autocomplete="off" spellcheck="false" />
+                <button type="button" class="icon-btn" data-toggle-secret="gemini-api-key" aria-label="Show or hide Gemini API key">
+                  <svg viewBox="0 0 20 20" width="16" height="16" fill="none" aria-hidden="true">
+                    <path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5Z" stroke="currentColor" stroke-width="1.6" />
+                    <circle cx="10" cy="10" r="2.2" stroke="currentColor" stroke-width="1.6" />
+                  </svg>
+                </button>
+              </div>
+              <p class="field-hint">Stored locally on this device only. Uses Google Gemini Interactions API v1.</p>
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="gemini-model-preset">Model</label>
+              <select id="gemini-model-preset" class="select"></select>
+            </div>
+
+            <div class="field-group hidden" id="gemini-custom-model-group">
+              <label class="field-label" for="gemini-custom-model">Custom Model ID</label>
+              <input id="gemini-custom-model" type="text" class="input" placeholder="e.g. gemini-4-hydrogen" autocomplete="off" />
+            </div>
+          </div>
+
+          <!-- Ollama Local Config -->
+          <div id="config-ollama" class="provider-config hidden">
+            <div class="field-group">
+              <label class="field-label" for="ollama-url">Ollama Base URL</label>
+              <div class="input-row">
+                <input id="ollama-url" type="url" class="input" placeholder="http://localhost:11434" autocomplete="off" />
+                <button type="button" id="scan-ollama-btn" class="btn btn-secondary btn-compact">Scan</button>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="ollama-model">Local Model</label>
+              <input id="ollama-model" type="text" class="input" list="ollama-model-list" placeholder="e.g. qwen2.5:7b, gemma4, llama3.2" autocomplete="off" />
+              <datalist id="ollama-model-list"></datalist>
+              <p class="field-hint">
+                If Ollama blocks extension requests (HTTP 403), run with <code>OLLAMA_ORIGINS="*"</code>.
+              </p>
+            </div>
+          </div>
+
+          <!-- OpenAI-Compatible Config -->
+          <div id="config-openai" class="provider-config hidden">
+            <div class="field-group">
+              <label class="field-label" for="openai-preset">Quick Preset</label>
+              <div class="preset-chips" id="openai-presets"></div>
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="openai-base-url">Base URL</label>
+              <input id="openai-base-url" type="url" class="input" placeholder="https://api.openai.com/v1" autocomplete="off" />
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="openai-api-key">API Key (optional for localhost)</label>
+              <div class="input-row">
+                <input id="openai-api-key" type="password" class="input" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+                <button type="button" class="icon-btn" data-toggle-secret="openai-api-key" aria-label="Show or hide OpenAI API key">
+                  <svg viewBox="0 0 20 20" width="16" height="16" fill="none" aria-hidden="true">
+                    <path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5Z" stroke="currentColor" stroke-width="1.6" />
+                    <circle cx="10" cy="10" r="2.2" stroke="currentColor" stroke-width="1.6" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="openai-model">Model Name</label>
+              <input id="openai-model" type="text" class="input" placeholder="gpt-4o-mini" autocomplete="off" />
+            </div>
+          </div>
+
+          <div class="test-bar">
+            <button type="button" id="test-connection-btn" class="btn btn-primary">Test Connection</button>
+            <button type="button" id="clear-cache-btn" class="btn btn-ghost">Clear Cache</button>
+          </div>
+          <div id="connection-result" class="feedback hidden" role="status" aria-live="polite"></div>
+        </section>
+
+        <!-- PANEL 3: Style -->
+        <section id="panel-style" class="panel hidden" role="tabpanel" aria-labelledby="tab-style">
+          <!-- Live Visual Preview -->
+          <div class="preview-stage" aria-label="Subtitle appearance preview">
+            <div id="preview-cue" class="preview-cue">
+              <p id="preview-primary" class="preview-primary">YouTube subtitles should read like real sentences.</p>
+              <p id="preview-secondary" class="preview-secondary">Phụ đề YouTube nên đọc mượt như câu văn thực thụ.</p>
+            </div>
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-head">
+              <label class="field-label" for="font-size">Font Size</label>
+              <span id="font-size-val" class="slider-val">22px</span>
+            </div>
+            <input id="font-size" type="range" class="range" min="14" max="36" step="1" value="22" />
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-head">
+              <label class="field-label" for="bg-opacity">Backdrop Opacity</label>
+              <span id="bg-opacity-val" class="slider-val">78%</span>
+            </div>
+            <input id="bg-opacity" type="range" class="range" min="0" max="95" step="5" value="78" />
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-head">
+              <label class="field-label" for="bottom-offset">Bottom Position</label>
+              <span id="bottom-offset-val" class="slider-val">9%</span>
+            </div>
+            <input id="bottom-offset" type="range" class="range" min="4" max="60" step="1" value="9" />
+          </div>
+
+          <div class="field-group">
+            <label class="field-label">Dual Subtitle Order</label>
+            <div class="segmented segmented-2" role="group" aria-label="Dual subtitle line order">
+              <button type="button" class="seg-btn" data-dual-order="original-top" aria-pressed="true">Original on top</button>
+              <button type="button" class="seg-btn" data-dual-order="translated-top" aria-pressed="false">Translation on top</button>
+            </div>
+          </div>
+
+          <div class="toggle-list">
+            <label class="toggle-row" for="hide-native-toggle">
+              <span class="toggle-copy">
+                <span class="toggle-title">Hide YouTube native captions</span>
+                <span class="toggle-desc">Suppresses word-by-word captions while BetterSubtitle is on.</span>
+              </span>
+              <input id="hide-native-toggle" type="checkbox" class="checkbox" checked />
+            </label>
+
+            <label class="toggle-row" for="pause-hover-toggle">
+              <span class="toggle-copy">
+                <span class="toggle-title">Pause video on subtitle hover</span>
+                <span class="toggle-desc">Hold pointer over a sentence to pause and read.</span>
+              </span>
+              <input id="pause-hover-toggle" type="checkbox" class="checkbox" />
+            </label>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
