@@ -21,14 +21,14 @@ interface ActiveCaptureConfig {
 }
 
 const PCM_CHUNK_SAMPLES = 1600; // 100ms @ 16kHz
-const SILENCE_RMS_THRESHOLD = 0.04;
-const HYBRID_VAD_SILENCE_MS = 1100;
+const SILENCE_RMS_THRESHOLD = 0.035;
+const HYBRID_VAD_SILENCE_MS = 750;
 
 let activeConfig: ActiveCaptureConfig | null = null;
 let mediaStream: MediaStream | null = null;
 let audioCtx: AudioContext | null = null;
 let sourceNode: MediaStreamAudioSourceNode | null = null;
-let processorNode: ScriptProcessorNode | null = null;
+let workletNode: AudioWorkletNode | null = null;
 let silentGainNode: GainNode | null = null;
 let ws: WebSocket | null = null;
 let wsReady = false;
@@ -84,13 +84,16 @@ function stopCapture(emitIdle = true): void {
   closeSocketOnly();
 
   try {
-    processorNode?.disconnect();
+    if (workletNode) {
+      workletNode.port.onmessage = null;
+      workletNode.disconnect();
+    }
     sourceNode?.disconnect();
     silentGainNode?.disconnect();
   } catch {
     // ignore
   }
-  processorNode = null;
+  workletNode = null;
   sourceNode = null;
   silentGainNode = null;
 
@@ -323,20 +326,29 @@ async function startCapture(config: ActiveCaptureConfig): Promise<{ ok: boolean;
     // CRITICAL: Route captured tab audio straight back to speakers so the tab is NOT muted!
     sourceNode.connect(audioCtx.destination);
 
-    // Tap parallel branch for PCM16 downsampling -> WebSocket streaming
-    processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
+    // Tap parallel branch using modern AudioWorkletNode (off-main-thread, zero deprecation warnings)
+    const workletUrl = chrome.runtime.getURL('pcm-worklet.js');
+    await audioCtx.audioWorklet.addModule(workletUrl);
+
+    workletNode = new AudioWorkletNode(audioCtx, 'bettersubtitle-pcm-processor', {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      channelCount: 1,
+    });
     silentGainNode = audioCtx.createGain();
     silentGainNode.gain.value = 0;
 
-    sourceNode.connect(processorNode);
-    processorNode.connect(silentGainNode);
+    sourceNode.connect(workletNode);
+    workletNode.connect(silentGainNode);
     silentGainNode.connect(audioCtx.destination);
 
     const inputRate = audioCtx.sampleRate;
 
-    processorNode.onaudioprocess = (ev: AudioProcessingEvent) => {
+    workletNode.port.onmessage = (ev: MessageEvent<Float32Array>) => {
       if (intentionallyStopped || !activeConfig) return;
-      const channelData = ev.inputBuffer.getChannelData(0);
+      const channelData = ev.data;
+      if (!(channelData instanceof Float32Array) || channelData.length === 0) return;
+
       const level = computeRmsLevel(channelData);
       const now = Date.now();
 

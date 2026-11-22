@@ -1,3 +1,9 @@
+import {
+  DEFAULT_LIVE_MAX_CHARS,
+  formatLiveSubtitleWindow,
+  splitCompletedAndActive,
+  splitLiveSentences,
+} from '../shared/live-text';
 import { exportCuesToSrt } from '../shared/srt';
 import { loadSettings } from '../shared/storage';
 import type {
@@ -38,6 +44,11 @@ let liveStatus: LiveSessionStatus = {
 let liveCues: SubtitleCue[] = [];
 let liveCueSeq = 0;
 let liveEpoch = 0;
+let utteranceCommittedCount = 0;
+let latestDisplayOriginal = '';
+let latestDisplayTranslation = '';
+let latestDisplayTranslationAt = 0;
+let translationSeq = 0;
 
 async function injectIntoYouTubeTab(tabId: number): Promise<boolean> {
   if (!chrome.scripting?.executeScript) return false;
@@ -165,6 +176,11 @@ async function startLiveAudioSession(payload: {
   liveEpoch++;
   liveCues = [];
   liveCueSeq = 0;
+  utteranceCommittedCount = 0;
+  latestDisplayOriginal = '';
+  latestDisplayTranslation = '';
+  latestDisplayTranslationAt = 0;
+  translationSeq = 0;
 
   // Mount overlay on target tab (YouTube uses native content.js; any other site gets live-overlay.js)
   if (YOUTUBE_URL_RE.test(payload.tabUrl)) {
@@ -272,6 +288,72 @@ async function stopLiveAudioSession(): Promise<{ ok: boolean; status: LiveSessio
   return { ok: true, status: { ...liveStatus } };
 }
 
+function appendLiveCue(sentence: string, elapsedMs: number): SubtitleCue {
+  const cueId = `live-${++liveCueSeq}`;
+  const prevCue = liveCues[liveCues.length - 1];
+  const startMs = prevCue
+    ? Math.max(prevCue.endMs, elapsedMs - 2200)
+    : Math.max(0, elapsedMs - 2200);
+  const cue: SubtitleCue = {
+    id: cueId,
+    startMs,
+    endMs: Math.max(startMs + 1000, elapsedMs + 350),
+    original: sentence,
+    source: 'live',
+  };
+  liveCues.push(cue);
+  liveStatus.cueCount = liveCues.length;
+  return cue;
+}
+
+async function translateAndDisplayLiveCue(params: {
+  cue: SubtitleCue;
+  targetTabId: number;
+  myEpoch: number;
+  elapsedMs: number;
+  isFinal: boolean;
+}): Promise<void> {
+  const settings = await loadSettings();
+  if (settings.mode === 'original') return;
+
+  const myTranslationSeq = ++translationSeq;
+  const recentHistory = liveCues.slice(-4, -1).map((c) => c.original);
+  const sentenceToTranslate = formatLiveSubtitleWindow(params.cue.original, 160);
+
+  try {
+    const translated = await translateLiveSentence({
+      text: sentenceToTranslate,
+      targetLanguage: settings.targetLanguage,
+      settings,
+      recentHistory,
+    });
+    if (params.myEpoch !== liveEpoch || !liveStatus.active || !translated) return;
+
+    const compactTranslation = formatLiveSubtitleWindow(translated, DEFAULT_LIVE_MAX_CHARS + 15);
+    params.cue.translated = translated;
+
+    // Only update on-screen translation if a newer translation hasn't already superseded it
+    if (myTranslationSeq >= translationSeq) {
+      latestDisplayTranslation = compactTranslation;
+      latestDisplayTranslationAt = Date.now();
+      liveStatus.latestTranslated = compactTranslation;
+
+      sendTabMessageSafe(params.targetTabId, {
+        type: 'LIVE_SUBTITLE_UPDATE',
+        payload: {
+          id: params.cue.id,
+          original: latestDisplayOriginal || formatLiveSubtitleWindow(params.cue.original),
+          translated: compactTranslation,
+          isFinal: params.isFinal,
+          timestampMs: params.elapsedMs,
+        },
+      });
+    }
+  } catch {
+    // Non-fatal: keep finalized original sentence visible
+  }
+}
+
 async function handleLiveTranscript(payload: {
   text: string;
   isFinal: boolean;
@@ -284,14 +366,44 @@ async function handleLiveTranscript(payload: {
   const targetTabId = liveStatus.tabId;
   const myEpoch = liveEpoch;
   const elapsedMs = Math.max(0, Date.now() - (liveStatus.startedAt ?? Date.now()));
+  const displayOriginal = formatLiveSubtitleWindow(text, DEFAULT_LIVE_MAX_CHARS);
+  if (!displayOriginal) return;
+
+  latestDisplayOriginal = displayOriginal;
+  liveStatus.latestOriginal = displayOriginal;
+
+  const freshTranslation =
+    latestDisplayTranslation && Date.now() - latestDisplayTranslationAt < 7500
+      ? latestDisplayTranslation
+      : undefined;
 
   if (!payload.isFinal) {
-    liveStatus.latestOriginal = text;
+    // During long non-stop monologues, commit & translate completed sentences incrementally
+    const { completed } = splitCompletedAndActive(text);
+    if (completed.length > utteranceCommittedCount) {
+      let newestCue: SubtitleCue | null = null;
+      for (let i = utteranceCommittedCount; i < completed.length; i++) {
+        newestCue = appendLiveCue(completed[i], elapsedMs);
+      }
+      utteranceCommittedCount = completed.length;
+
+      if (newestCue) {
+        void translateAndDisplayLiveCue({
+          cue: newestCue,
+          targetTabId,
+          myEpoch,
+          elapsedMs,
+          isFinal: false,
+        });
+      }
+    }
+
     sendTabMessageSafe(targetTabId, {
       type: 'LIVE_SUBTITLE_UPDATE',
       payload: {
         id: `live-interim-${liveCueSeq}`,
-        original: text,
+        original: displayOriginal,
+        translated: freshTranslation,
         isFinal: false,
         timestampMs: elapsedMs,
       },
@@ -299,64 +411,47 @@ async function handleLiveTranscript(payload: {
     return;
   }
 
-  // Finalized sentence
-  const cueId = `live-${++liveCueSeq}`;
-  const prevCue = liveCues[liveCues.length - 1];
-  const startMs = prevCue ? Math.max(prevCue.endMs, elapsedMs - 2500) : Math.max(0, elapsedMs - 2500);
-  const cue: SubtitleCue = {
-    id: cueId,
-    startMs,
-    endMs: Math.max(startMs + 1200, elapsedMs + 400),
-    original: text,
-    source: 'live',
-  };
-  liveCues.push(cue);
-  liveStatus.cueCount = liveCues.length;
-  liveStatus.latestOriginal = text;
-  liveStatus.latestTranslated = '';
+  // Finalized utterance: commit any remaining sentences not already committed incrementally
+  const sentences = splitLiveSentences(text);
+  const remaining =
+    sentences.length > utteranceCommittedCount
+      ? sentences.slice(utteranceCommittedCount)
+      : sentences.slice(-1);
+  utteranceCommittedCount = 0;
 
-  // Push finalized original sentence right away so user never waits for translation
+  let lastCue: SubtitleCue | null = null;
+  for (const sentence of remaining) {
+    const prev = liveCues[liveCues.length - 1];
+    if (prev && prev.original === sentence) {
+      lastCue = prev;
+      continue;
+    }
+    lastCue = appendLiveCue(sentence, elapsedMs);
+  }
+  if (!lastCue) return;
+
+  // Push compact 1-2 line finalized text immediately so user never waits for translation
   sendTabMessageSafe(targetTabId, {
     type: 'LIVE_SUBTITLE_UPDATE',
     payload: {
-      id: cueId,
-      original: text,
+      id: lastCue.id,
+      original: displayOriginal,
+      translated: lastCue.translated
+        ? formatLiveSubtitleWindow(lastCue.translated, DEFAULT_LIVE_MAX_CHARS + 15)
+        : freshTranslation,
       isFinal: true,
       timestampMs: elapsedMs,
     },
   });
 
-  // Translate if Dual or Translated mode is active
-  const settings = await loadSettings();
-  if (settings.mode === 'original') return;
-
-  const recentHistory = liveCues.slice(-4, -1).map((c) => c.original);
-  try {
-    const translated = await translateLiveSentence({
-      text,
-      targetLanguage: settings.targetLanguage,
-      settings,
-      recentHistory,
+  if (!lastCue.translated) {
+    await translateAndDisplayLiveCue({
+      cue: lastCue,
+      targetTabId,
+      myEpoch,
+      elapsedMs,
+      isFinal: true,
     });
-    if (myEpoch !== liveEpoch || !liveStatus.active || !translated) return;
-
-    cue.translated = translated;
-    if (liveStatus.latestOriginal === text) {
-      liveStatus.latestTranslated = translated;
-    }
-
-    sendTabMessageSafe(targetTabId, {
-      type: 'LIVE_SUBTITLE_UPDATE',
-      payload: {
-        id: cueId,
-        original: text,
-        translated,
-        isFinal: true,
-        timestampMs: elapsedMs,
-      },
-    });
-  } catch {
-    // Non-fatal: keep finalized original sentence visible
   }
 }
 

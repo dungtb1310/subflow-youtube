@@ -15,6 +15,7 @@ const REQUIRED_FILES = [
   'service-worker.js',
   'offscreen.html',
   'offscreen.js',
+  'pcm-worklet.js',
   'popup.html',
   'popup.js',
   'popup.css',

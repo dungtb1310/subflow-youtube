@@ -33,7 +33,7 @@ const UNIVERSAL_STYLES = `
   left: 50%;
   transform: translateX(-50%);
   bottom: var(--bs-bottom, 9%);
-  width: min(86vw, 960px);
+  width: min(82vw, 760px);
   display: flex;
   flex-direction: column;
   align-items: center;

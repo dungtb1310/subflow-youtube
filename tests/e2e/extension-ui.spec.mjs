@@ -612,7 +612,28 @@ async function run() {
     assert.equal(liveErrors.length, 0, `Universal live-overlay errors: ${liveErrors.join('; ')}`);
     console.log('[E2E] Universal non-YouTube live-overlay.js injection & rendering PASSED');
 
-    // 6. Verify MV3 Offscreen Document boot, OFFSCREEN_STOP auto-closes offscreen doc, and fatal error UI preservation
+    // 6. Verify MV3 Offscreen Document boot, AudioWorklet registration, OFFSCREEN_STOP auto-close, and fatal error UI
+    const offscreenProbe = await context.newPage();
+    const offscreenWarnings = [];
+    offscreenProbe.on('pageerror', (e) => offscreenWarnings.push(e.message));
+    offscreenProbe.on('console', (m) => {
+      if (m.type() === 'error' || /ScriptProcessorNode/i.test(m.text())) {
+        offscreenWarnings.push(m.text());
+      }
+    });
+    await offscreenProbe.goto(`chrome-extension://${extensionId}/offscreen.html`, { waitUntil: 'domcontentloaded' });
+    const workletOk = await offscreenProbe.evaluate(async () => {
+      const ctx = new AudioContext();
+      await ctx.audioWorklet.addModule(chrome.runtime.getURL('pcm-worklet.js'));
+      const node = new AudioWorkletNode(ctx, 'bettersubtitle-pcm-processor');
+      node.disconnect();
+      await ctx.close();
+      return true;
+    });
+    assert.equal(workletOk, true, 'AudioWorkletNode pcm-worklet.js must load cleanly');
+    assert.equal(offscreenWarnings.length, 0, `Offscreen errors/warnings: ${offscreenWarnings.join('; ')}`);
+    await offscreenProbe.close();
+
     const offscreenCycle = await serviceWorker.evaluate(async () => {
       await chrome.offscreen.createDocument({
         url: 'offscreen.html',
