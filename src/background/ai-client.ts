@@ -553,6 +553,142 @@ export async function processTranscriptChunk(params: ProcessChunkParams): Promis
   );
 }
 
+export async function translateLiveSentence(params: {
+  text: string;
+  targetLanguage: string;
+  settings: SubFlowSettings;
+  recentHistory?: string[];
+}): Promise<string | undefined> {
+  const cleanText = params.text.trim();
+  if (!cleanText) return undefined;
+
+  // Choose active translation provider (if VOD provider is offline but user has a Gemini key in Live mode, use Gemini)
+  const effectiveProvider =
+    params.settings.provider === 'offline' && params.settings.geminiApiKey.trim()
+      ? 'gemini'
+      : params.settings.provider;
+
+  if (effectiveProvider === 'offline') {
+    return undefined;
+  }
+
+  const targetLabel = getLanguageLabel(params.targetLanguage || 'vi');
+  const historyBlock =
+    params.recentHistory && params.recentHistory.length > 0
+      ? `Recent spoken context:\n${params.recentHistory.slice(-3).map((s) => `- ${s}`).join('\n')}\n\n`
+      : '';
+
+  const systemInstruction = [
+    `You are a fast real-time livestream subtitle translator translating into natural spoken ${targetLabel}.`,
+    'Translate concisely and idiomatically, preserving tone and slang naturally.',
+    'Output strictly valid JSON: {"translated":"..."} with no extra commentary.',
+  ].join('\n');
+
+  const userPrompt = `${historyBlock}Translate this live line into ${targetLabel}:\n"${cleanText}"`;
+
+  const schema: Record<string, unknown> = {
+    type: 'object',
+    properties: {
+      translated: { type: 'string' },
+    },
+    required: ['translated'],
+  };
+
+  let rawText = '';
+  if (effectiveProvider === 'gemini') {
+    const res = await callGeminiInteractions({
+      apiKey: params.settings.geminiApiKey,
+      model: params.settings.geminiModel,
+      systemInstruction,
+      userPrompt,
+      schema,
+    });
+    rawText = res.text;
+  } else if (effectiveProvider === 'ollama') {
+    rawText = await callOllamaChat({
+      ollamaUrl: params.settings.ollamaUrl,
+      model: params.settings.ollamaModel,
+      systemInstruction,
+      userPrompt,
+      schema,
+    });
+  } else if (effectiveProvider === 'openai') {
+    rawText = await callOpenAiCompatible({
+      baseUrl: params.settings.openaiBaseUrl,
+      apiKey: params.settings.openaiApiKey,
+      model: params.settings.openaiModel,
+      systemInstruction,
+      userPrompt,
+    });
+  }
+
+  const unfenced = rawText
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  try {
+    const parsed = JSON.parse(unfenced) as { translated?: string };
+    if (typeof parsed.translated === 'string' && parsed.translated.trim()) {
+      return parsed.translated.trim();
+    }
+  } catch {
+    const start = unfenced.indexOf('{');
+    const end = unfenced.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      try {
+        const parsed = JSON.parse(unfenced.slice(start, end + 1)) as { translated?: string };
+        if (typeof parsed.translated === 'string' && parsed.translated.trim()) {
+          return parsed.translated.trim();
+        }
+      } catch {
+        // fallback below
+      }
+    }
+  }
+
+  return unfenced || undefined;
+}
+
+export async function testLocalWhisperServer(
+  localWhisperUrl: string,
+): Promise<TestConnectionResponse> {
+  const started = Date.now();
+  const baseUrl = (localWhisperUrl || 'http://localhost:8765').trim().replace(/\/+$/, '');
+  try {
+    const res = await fetchWithTimeout(`${baseUrl}/health`, { method: 'GET' }, 6000);
+    const latencyMs = Date.now() - started;
+    if (!res.ok) {
+      return {
+        ok: false,
+        message: `Local Whisper server returned HTTP ${res.status}.`,
+        latencyMs,
+      };
+    }
+    const info = (await res.json()) as {
+      ok?: boolean;
+      backend?: string;
+      device?: string;
+      model?: string;
+    };
+    const backend = info.backend || 'whisper';
+    const device = info.device || 'cpu';
+    const model = info.model || 'small';
+    return {
+      ok: true,
+      message: `Connected: ${backend} (${model} on ${device.toUpperCase()}) in ${latencyMs}ms.`,
+      latencyMs,
+    };
+  } catch {
+    return {
+      ok: false,
+      message: `Cannot reach Local Whisper at ${baseUrl}. Run "python server/live_whisper_server.py" first.`,
+      latencyMs: Date.now() - started,
+    };
+  }
+}
+
 export async function listOllamaModels(ollamaUrl: string): Promise<ListOllamaModelsResponse> {
   const baseUrl = (ollamaUrl || 'http://localhost:11434').trim().replace(/\/+$/, '');
   try {

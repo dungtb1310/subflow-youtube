@@ -1,6 +1,6 @@
 {
   "name": "better-subtitle",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Smart sentence-level & AI-powered subtitle extension for YouTube",

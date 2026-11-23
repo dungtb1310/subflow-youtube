@@ -27,6 +27,9 @@ export function normalizeSettings(raw?: Partial<SubFlowSettings> | null): SubFlo
   merged.openaiBaseUrl = (merged.openaiBaseUrl || DEFAULT_SETTINGS.openaiBaseUrl)
     .trim()
     .replace(/\/+$/, '');
+  merged.localWhisperUrl = (merged.localWhisperUrl || DEFAULT_SETTINGS.localWhisperUrl)
+    .trim()
+    .replace(/\/+$/, '');
   return merged;
 }
 

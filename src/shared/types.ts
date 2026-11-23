@@ -4,6 +4,8 @@ export type AiProvider = 'offline' | 'gemini' | 'ollama' | 'openai';
 
 export type DualOrder = 'original-top' | 'translated-top';
 
+export type LiveSttEngine = 'gemini-live' | 'local-whisper';
+
 export interface SubFlowSettings {
   enabled: boolean;
   mode: SubtitleMode;
@@ -22,6 +24,9 @@ export interface SubFlowSettings {
   dualOrder: DualOrder;
   hideNativeCaptions: boolean;
   pauseOnHover: boolean;
+  liveEngine: LiveSttEngine;
+  liveSourceLanguage: string;
+  localWhisperUrl: string;
 }
 
 export interface CaptionTrackInfo {
@@ -46,7 +51,8 @@ export interface SubtitleCue {
   endMs: number;
   original: string;
   translated?: string;
-  source: 'heuristic' | 'ai';
+  source: 'heuristic' | 'ai' | 'live';
+  isInterim?: boolean;
 }
 
 export interface TranscriptChunk {
@@ -87,7 +93,31 @@ export interface RuntimeStatus {
   message?: string;
 }
 
-// Messages sent from Content Script or Popup to Background Service Worker
+export type LiveSessionState = 'idle' | 'connecting' | 'listening' | 'reconnecting' | 'error';
+
+export interface LiveSessionStatus {
+  active: boolean;
+  tabId: number | null;
+  tabTitle: string;
+  engine: LiveSttEngine;
+  state: LiveSessionState;
+  audioLevel: number;
+  startedAt: number | null;
+  cueCount: number;
+  latestOriginal: string;
+  latestTranslated: string;
+  error?: string;
+}
+
+export interface LiveCuePayload {
+  id: string;
+  original: string;
+  translated?: string;
+  isFinal: boolean;
+  timestampMs: number;
+}
+
+// Messages sent from Content Script, Popup, or Offscreen Document to Background Service Worker
 export type BackgroundRequest =
   | {
       type: 'PROCESS_CHUNK';
@@ -117,6 +147,68 @@ export type BackgroundRequest =
       payload: {
         tabId: number;
       };
+    }
+  | {
+      type: 'START_LIVE_AUDIO';
+      payload: {
+        tabId: number;
+        tabTitle: string;
+        tabUrl: string;
+        streamId: string;
+      };
+    }
+  | {
+      type: 'STOP_LIVE_AUDIO';
+    }
+  | {
+      type: 'GET_LIVE_STATUS';
+    }
+  | {
+      type: 'EXPORT_LIVE_SRT';
+    }
+  | {
+      type: 'TEST_LOCAL_WHISPER';
+      payload: {
+        localWhisperUrl: string;
+      };
+    }
+  | {
+      type: 'OFFSCREEN_TRANSCRIPT';
+      payload: {
+        text: string;
+        isFinal: boolean;
+        language?: string;
+      };
+    }
+  | {
+      type: 'OFFSCREEN_STATE';
+      payload: {
+        state: LiveSessionState;
+        error?: string;
+        fatal?: boolean;
+      };
+    }
+  | {
+      type: 'OFFSCREEN_AUDIO_LEVEL';
+      payload: {
+        level: number;
+      };
+    };
+
+// Messages sent from Service Worker to Offscreen Document
+export type OffscreenRequest =
+  | {
+      type: 'OFFSCREEN_START';
+      payload: {
+        streamId: string;
+        engine: LiveSttEngine;
+        geminiApiKey: string;
+        liveSourceLanguage: string;
+        localWhisperUrl: string;
+      };
+    }
+  | {
+      type: 'OFFSCREEN_STOP';
     };
 
 export interface ProcessChunkResponse {
@@ -137,12 +229,24 @@ export interface ListOllamaModelsResponse {
   error?: string;
 }
 
-// Messages sent from Popup to Active YouTube Content Script
+// Messages sent from Popup or Background to Active Tab Content Script / Live Overlay
 export type ContentRequest =
   | { type: 'GET_STATUS' }
   | { type: 'EXPORT_SRT' }
   | { type: 'CLEAR_CACHE' }
-  | { type: 'REPROCESS_VIDEO' };
+  | { type: 'REPROCESS_VIDEO' }
+  | {
+      type: 'LIVE_SUBTITLE_UPDATE';
+      payload: LiveCuePayload;
+    }
+  | {
+      type: 'LIVE_SESSION_STATE';
+      payload: {
+        active: boolean;
+        state: LiveSessionState;
+        error?: string;
+      };
+    };
 
 export interface ExportSrtResponse {
   ok: boolean;

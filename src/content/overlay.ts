@@ -1,4 +1,4 @@
-import type { RuntimeStatus, SubFlowSettings, SubtitleCue } from '../shared/types';
+import type { LiveSessionState, RuntimeStatus, SubFlowSettings, SubtitleCue } from '../shared/types';
 
 const OVERLAY_HOST_ID = 'subflow-overlay-root';
 const HIDE_NATIVE_STYLE_ID = 'subflow-hide-native-captions-style';
@@ -153,6 +153,10 @@ const OVERLAY_STYLES = `
   color: #F6F7FA;
 }
 
+.sf-cue-box.is-interim .sf-line-primary {
+  color: #CBD3E1;
+}
+
 .sf-hidden {
   display: none !important;
 }
@@ -171,6 +175,7 @@ export class SubtitleOverlay {
   private settings: SubFlowSettings;
   private currentCue: SubtitleCue | null = null;
   private currentStatus: RuntimeStatus | null = null;
+  private liveState: { active: boolean; state: LiveSessionState; error?: string } | null = null;
   private controlsObserver: MutationObserver | null = null;
   private statusHideTimer: number | null = null;
   private pausedByHover = false;
@@ -282,16 +287,29 @@ export class SubtitleOverlay {
     if (
       prev?.id === cue?.id &&
       prev?.original === cue?.original &&
-      prev?.translated === cue?.translated
+      prev?.translated === cue?.translated &&
+      prev?.isInterim === cue?.isInterim
     ) {
       return;
     }
     this.currentCue = cue;
     this.renderCue();
+    if (this.liveState) {
+      this.renderStatus();
+    }
   }
 
   public setStatus(status: RuntimeStatus): void {
     this.currentStatus = status;
+    this.renderStatus();
+  }
+
+  public setLiveState(
+    liveState: { active: boolean; state: LiveSessionState; error?: string } | null,
+  ): void {
+    this.liveState = liveState;
+    this.applyStyles();
+    this.renderCue();
     this.renderStatus();
   }
 
@@ -310,7 +328,8 @@ export class SubtitleOverlay {
     this.hostEl.style.setProperty('--sf-bottom', `${this.settings.bottomOffsetPercent}%`);
 
     if (this.stageEl) {
-      this.stageEl.classList.toggle('sf-hidden', !this.settings.enabled);
+      const visible = this.settings.enabled || Boolean(this.liveState?.active);
+      this.stageEl.classList.toggle('sf-hidden', !visible);
     }
   }
 
@@ -334,7 +353,8 @@ export class SubtitleOverlay {
   private renderCue(): void {
     if (!this.cueBoxEl || !this.primaryLineEl || !this.secondaryLineEl) return;
 
-    if (!this.settings.enabled || !this.currentCue) {
+    const visible = this.settings.enabled || Boolean(this.liveState?.active);
+    if (!visible || !this.currentCue) {
       this.cueBoxEl.classList.remove('has-content');
       this.cueBoxEl.classList.add('sf-hidden');
       this.primaryLineEl.textContent = '';
@@ -382,6 +402,7 @@ export class SubtitleOverlay {
       this.cueBoxEl.classList.add('single-line');
     }
 
+    this.cueBoxEl.classList.toggle('is-interim', Boolean(cue.isInterim));
     this.cueBoxEl.classList.remove('sf-hidden');
     this.cueBoxEl.classList.add('has-content');
   }
@@ -392,6 +413,33 @@ export class SubtitleOverlay {
     if (this.statusHideTimer !== null) {
       window.clearTimeout(this.statusHideTimer);
       this.statusHideTimer = null;
+    }
+
+    // Live Audio status takes precedence when a live capture session is active
+    if (this.liveState) {
+      this.statusChipEl.classList.remove('is-processing', 'is-error');
+      if (this.liveState.state === 'connecting') {
+        this.statusTextEl.textContent = 'Live Audio: Connecting...';
+        this.statusChipEl.classList.add('visible', 'is-processing');
+        return;
+      }
+      if (this.liveState.state === 'reconnecting') {
+        this.statusTextEl.textContent = 'Live Audio: Reconnecting...';
+        this.statusChipEl.classList.add('visible', 'is-processing');
+        return;
+      }
+      if (this.liveState.state === 'error' && this.liveState.error) {
+        this.statusTextEl.textContent = this.liveState.error;
+        this.statusChipEl.classList.add('visible', 'is-error');
+        return;
+      }
+      if (this.liveState.state === 'listening' && !this.currentCue) {
+        this.statusTextEl.textContent = 'Live Audio: Listening...';
+        this.statusChipEl.classList.add('visible', 'is-processing');
+        return;
+      }
+      this.statusChipEl.classList.remove('visible');
+      return;
     }
 
     const st = this.currentStatus;

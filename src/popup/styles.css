@@ -49,8 +49,8 @@ html,
 body {
   margin: 0;
   padding: 0;
-  width: 376px;
-  min-height: 440px;
+  width: 384px;
+  min-height: 460px;
   background: var(--sf-bg);
   color: var(--sf-text);
   font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -166,10 +166,25 @@ body {
 /* Tabs */
 .tabs {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  padding: 0 16px;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 0 12px;
   border-bottom: 1px solid var(--sf-border);
   background: var(--sf-bg);
+}
+
+.tab-label-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.live-tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f26c6c;
+  box-shadow: 0 0 0 2px rgba(242, 108, 108, 0.25);
 }
 
 .tab-btn {
@@ -744,3 +759,104 @@ kbd {
   cursor: pointer;
   flex-shrink: 0;
 }
+
+/* Live Audio Panel */
+.live-control-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.btn-live-start {
+  width: 100%;
+  height: 38px;
+}
+
+.btn-live-stop {
+  width: 100%;
+  height: 38px;
+  border: 1px solid rgba(242, 108, 108, 0.45);
+  background: rgba(242, 108, 108, 0.14);
+  color: #ffb2b2;
+}
+
+.btn-live-stop:hover:not(:disabled) {
+  background: rgba(242, 108, 108, 0.22);
+  border-color: rgba(242, 108, 108, 0.65);
+}
+
+.live-telemetry {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.live-state-text {
+  font-size: 11.5px;
+  color: var(--sf-text-muted);
+  line-height: 1.4;
+}
+
+.live-meter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.meter-track {
+  flex: 1;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--sf-surface-2);
+  overflow: hidden;
+}
+
+.meter-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--sf-accent);
+  transition: width 120ms ease-out;
+}
+
+.live-stats {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #d6dde9;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.live-transcript-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 10px;
+  border-top: 1px solid var(--sf-border);
+}
+
+.live-transcript-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.live-transcript-head .link-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+.live-line-orig {
+  font-size: 12.5px;
+  color: var(--sf-text);
+  line-height: 1.4;
+  min-height: 18px;
+}
+
+.live-line-trans {
+  font-size: 12px;
+  color: #f8d589;
+  line-height: 1.4;
+}
+

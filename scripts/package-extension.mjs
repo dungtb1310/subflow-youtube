@@ -10,8 +10,12 @@ const RELEASE_DIR = path.resolve(ROOT, 'release');
 const REQUIRED_FILES = [
   'manifest.json',
   'content.js',
+  'live-overlay.js',
   'page-bridge.js',
   'service-worker.js',
+  'offscreen.html',
+  'offscreen.js',
+  'pcm-worklet.js',
   'popup.html',
   'popup.js',
   'popup.css',

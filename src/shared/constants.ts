@@ -21,7 +21,28 @@ export const DEFAULT_SETTINGS: SubFlowSettings = {
   dualOrder: 'original-top',
   hideNativeCaptions: true,
   pauseOnHover: false,
+  liveEngine: 'gemini-live',
+  liveSourceLanguage: 'auto',
+  localWhisperUrl: 'http://localhost:8765',
 };
+
+export interface LiveSourceLanguageOption {
+  code: string;
+  label: string;
+}
+
+export const LIVE_SOURCE_LANGUAGES: LiveSourceLanguageOption[] = [
+  { code: 'auto', label: 'Auto-detect language' },
+  { code: 'en', label: 'English' },
+  { code: 'ja', label: 'Japanese (日本語)' },
+  { code: 'ko', label: 'Korean (한국어)' },
+  { code: 'zh', label: 'Chinese (中文)' },
+  { code: 'vi', label: 'Vietnamese (Tiếng Việt)' },
+  { code: 'fr', label: 'French (Français)' },
+  { code: 'de', label: 'German (Deutsch)' },
+  { code: 'es', label: 'Spanish (Español)' },
+  { code: 'ru', label: 'Russian (Русский)' },
+];
 
 export interface LanguageOption {
   code: string;

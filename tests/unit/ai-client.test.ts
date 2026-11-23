@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   extractRawCuesFromModelText,
   processTranscriptChunk,
+  testLocalWhisperServer,
   testProviderConnection,
+  translateLiveSentence,
 } from '../../src/background/ai-client';
 import { DEFAULT_SETTINGS } from '../../src/shared/constants';
 import type { WordToken } from '../../src/shared/types';
@@ -178,5 +180,54 @@ describe('ai-client', () => {
       provider: 'offline',
     });
     expect(res.ok).toBe(true);
+  });
+
+  it('translates single live sentence and checks Local Whisper health cleanly', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          steps: [
+            {
+              type: 'model_output',
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({ translated: 'Chào mừng mọi người đến với buổi live!' }),
+                },
+              ],
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          backend: 'openai-whisper',
+          device: 'cuda',
+          model: 'small',
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const translated = await translateLiveSentence({
+      text: 'Welcome everyone to the live stream!',
+      targetLanguage: 'vi',
+      settings: {
+        ...DEFAULT_SETTINGS,
+        provider: 'gemini',
+        geminiApiKey: 'test-key',
+      },
+      recentHistory: ['Hey guys!'],
+    });
+    expect(translated).toBe('Chào mừng mọi người đến với buổi live!');
+
+    const health = await testLocalWhisperServer('http://localhost:8765');
+    expect(health.ok).toBe(true);
+    expect(health.message).toContain('CUDA');
   });
 });

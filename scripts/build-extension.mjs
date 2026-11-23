@@ -47,14 +47,35 @@ async function run() {
     logLevel: 'warn',
   });
 
-  // Rename src/popup/index.html output (index.html -> popup.html)
   const builtIndex = path.join(DIST, 'index.html');
   const targetPopup = path.join(DIST, 'popup.html');
   if (fs.existsSync(builtIndex)) {
     fs.renameSync(builtIndex, targetPopup);
   }
 
-  // 2. MAIN world page-bridge script (self-contained IIFE)
+  // 2. MV3 Offscreen Document (for tabCapture Web Audio + WebSocket streaming)
+  await build({
+    configFile: false,
+    root: path.resolve(ROOT, 'src/offscreen'),
+    base: './',
+    build: {
+      outDir: DIST,
+      emptyOutDir: false,
+      sourcemap: false,
+      rollupOptions: {
+        input: {
+          offscreen: path.resolve(ROOT, 'src/offscreen/offscreen.html'),
+        },
+        output: {
+          entryFileNames: 'offscreen.js',
+          chunkFileNames: 'chunks/[name].js',
+        },
+      },
+    },
+    logLevel: 'warn',
+  });
+
+  // 3. MAIN world page-bridge script (self-contained IIFE)
   await build({
     configFile: false,
     root: ROOT,
@@ -72,7 +93,7 @@ async function run() {
     logLevel: 'warn',
   });
 
-  // 3. ISOLATED world content script (self-contained IIFE)
+  // 4. ISOLATED world YouTube content script (self-contained IIFE)
   await build({
     configFile: false,
     root: ROOT,
@@ -90,7 +111,25 @@ async function run() {
     logLevel: 'warn',
   });
 
-  // 4. MV3 Background Service Worker (ES module)
+  // 5. Universal floating Live Overlay for non-YouTube tabs (self-contained IIFE)
+  await build({
+    configFile: false,
+    root: ROOT,
+    build: {
+      outDir: DIST,
+      emptyOutDir: false,
+      sourcemap: false,
+      lib: {
+        entry: path.resolve(ROOT, 'src/content/live-overlay.ts'),
+        name: 'BetterSubtitleLiveOverlay',
+        formats: ['iife'],
+        fileName: () => 'live-overlay.js',
+      },
+    },
+    logLevel: 'warn',
+  });
+
+  // 6. MV3 Background Service Worker (ES module)
   await build({
     configFile: false,
     root: ROOT,
@@ -107,7 +146,7 @@ async function run() {
     logLevel: 'warn',
   });
 
-  // 5. Copy manifest.json and icons
+  // 7. Copy manifest.json and icons
   copyDirRecursive(PUBLIC_DIR, DIST);
 
   console.log('BetterSubtitle extension built successfully to dist/');

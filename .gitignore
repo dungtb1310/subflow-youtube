@@ -20,6 +20,10 @@ test-results/
 playwright-report/
 .playwright/
 
+# Python cache
+__pycache__/
+*.py[cod]
+
 # Local IDE / agent / handover / prompt files (never push to repo)
 .vscode/
 .idea/
